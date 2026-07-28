@@ -1,0 +1,74 @@
+# XcodeGen manifest — the source of truth for Diane.xcodeproj.
+# Regenerate after edits: scripts/generate.sh (the .xcodeproj is git-ignored).
+name: Diane
+options:
+  bundleIdPrefix: dev.stilltesting
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  DianeKit:
+    path: DianeKit
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    # Owner sets their team in Xcode (Signing & Capabilities) for device
+    # builds; simulator builds need no team.
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: false
+
+targets:
+  Diane:
+    type: application
+    platform: iOS
+    sources:
+      - Diane/Sources
+      - path: Diane/Resources
+        optional: true
+    dependencies:
+      - package: DianeKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.stilltesting.diane
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # Artwork lands here via scripts/set-app-icon.swift <file>.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: false
+        INFOPLIST_FILE: Diane/Info.plist
+        CURRENT_PROJECT_VERSION: 1
+        MARKETING_VERSION: 0.1.0
+    # Push entitlement — needs the PAID Apple Developer team (pending as of
+    # 2026-07-27; personal teams can't sign aps-environment). When the
+    # membership is approved: uncomment these five lines, run
+    # scripts/generate.sh, and switch the Team in Signing & Capabilities.
+    # entitlements:
+    #   path: Diane/Diane.entitlements
+    #   properties:
+    #     # Sandbox APNs; archive/export rewrites this to production.
+    #     aps-environment: development
+
+  DianeTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests/DianeTests
+    settings:
+      base:
+        # Test bundles need an Info.plist; generate it (the app target keeps
+        # its explicit one).
+        GENERATE_INFOPLIST_FILE: true
+    dependencies:
+      - target: Diane
+
+schemes:
+  Diane:
+    build:
+      targets:
+        Diane: all
+    test:
+      gatherCoverageData: false
+      targets:
+        - DianeTests
+        - package: DianeKit/DianeKitTests

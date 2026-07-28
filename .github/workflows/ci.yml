@@ -1,0 +1,19 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      # Building runs swift-openapi-generator over the vendored spec — this is
+      # the loud contract gate: a breaking spec shape fails right here.
+      - run: >
+          xcodebuild -project Diane.xcodeproj -scheme Diane
+          -destination 'platform=iOS Simulator,name=iPhone 16'
+          -skipPackagePluginValidation test

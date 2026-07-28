@@ -1,0 +1,4834 @@
+openapi: 3.0.3
+info:
+  title: Diane API
+  version: 0.1.0
+components:
+  schemas:
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+        service:
+          type: string
+          example: api
+        version:
+          type: string
+          example: 0.1.0
+        gitSha:
+          type: string
+          nullable: true
+          example: abc1234
+        time:
+          type: string
+          example: 2026-07-13T12:00:00.000Z
+      required:
+        - status
+        - service
+        - version
+        - gitSha
+        - time
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: not_found
+        code:
+          type: string
+          example: E_NOT_FOUND
+      required:
+        - error
+    TokenResponse:
+      type: object
+      properties:
+        session:
+          $ref: "#/components/schemas/SessionInfo"
+        token:
+          type: string
+      required:
+        - session
+        - token
+    SessionInfo:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum:
+            - family
+            - member
+            - service
+        member:
+          $ref: "#/components/schemas/SessionMember"
+        canAdmin:
+          type: boolean
+        expiresAt:
+          type: string
+      required:
+        - kind
+        - member
+        - canAdmin
+        - expiresAt
+    SessionMember:
+      type: object
+      nullable: true
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        color:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+      required:
+        - id
+        - name
+        - color
+        - role
+    Role:
+      type: string
+      enum:
+        - mom
+        - dad
+        - kid
+    SetupRequest:
+      type: object
+      properties:
+        householdName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        tz:
+          type: string
+          minLength: 1
+          example: Europe/Warsaw
+        familyPassword:
+          type: string
+          minLength: 8
+          maxLength: 200
+      required:
+        - householdName
+        - tz
+        - familyPassword
+    IdentitiesResponse:
+      type: object
+      properties:
+        configured:
+          type: boolean
+        householdName:
+          type: string
+          nullable: true
+        restricted:
+          type: boolean
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/MemberIdentity"
+      required:
+        - configured
+        - householdName
+        - restricted
+        - members
+    MemberIdentity:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        color:
+          type: string
+          example: "#e5484d"
+        role:
+          type: string
+          nullable: true
+          enum:
+            - mom
+            - dad
+            - kid
+            - null
+        avatar:
+          type: string
+          nullable: true
+        hasPassword:
+          type: boolean
+          nullable: true
+        hasPasskeys:
+          type: boolean
+          nullable: true
+        passwordResetRequired:
+          type: boolean
+          nullable: true
+      required:
+        - id
+        - name
+        - color
+        - role
+        - avatar
+        - hasPassword
+        - hasPasskeys
+        - passwordResetRequired
+    NetworkInfo:
+      type: object
+      properties:
+        familyLoginAllowed:
+          type: boolean
+      required:
+        - familyLoginAllowed
+    LoginRequest:
+      type: object
+      properties:
+        scope:
+          type: string
+          enum:
+            - family
+            - member
+            - service
+        memberId:
+          type: string
+          maxLength: 64
+        password:
+          type: string
+          minLength: 1
+          maxLength: 200
+        label:
+          type: string
+          maxLength: 80
+      required:
+        - scope
+        - password
+    PasswordSetupRequest:
+      type: object
+      properties:
+        memberId:
+          type: string
+          maxLength: 64
+        familyPassword:
+          type: string
+          minLength: 1
+          maxLength: 200
+        password:
+          type: string
+          minLength: 8
+          maxLength: 200
+        label:
+          type: string
+          maxLength: 80
+      required:
+        - memberId
+        - familyPassword
+        - password
+    WebAuthnOptionsResponse:
+      type: object
+      properties:
+        requestId:
+          type: string
+        options:
+          type: object
+          additionalProperties:
+            nullable: true
+      required:
+        - requestId
+        - options
+    WebAuthnOptionsRequest:
+      type: object
+      properties:
+        memberId:
+          type: string
+          minLength: 1
+          maxLength: 64
+      required:
+        - memberId
+    WebAuthnCredentialCreated:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+          nullable: true
+      required:
+        - id
+        - label
+    WebAuthnRegisterVerifyRequest:
+      type: object
+      properties:
+        requestId:
+          type: string
+          minLength: 1
+        response:
+          type: object
+          additionalProperties:
+            nullable: true
+        label:
+          type: string
+          maxLength: 80
+      required:
+        - requestId
+        - response
+    WebAuthnLoginVerifyRequest:
+      type: object
+      properties:
+        requestId:
+          type: string
+          minLength: 1
+        response:
+          type: object
+          additionalProperties:
+            nullable: true
+      required:
+        - requestId
+        - response
+    MemberList:
+      type: object
+      properties:
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/Member"
+      required:
+        - members
+    Member:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        color:
+          type: string
+          pattern: ^#[0-9a-fA-F]{6}$
+        avatar:
+          type: string
+          nullable: true
+        birthday:
+          type: string
+          nullable: true
+        role:
+          $ref: "#/components/schemas/Role"
+        sortOrder:
+          type: integer
+        hasPassword:
+          type: boolean
+        hasPasskeys:
+          type: boolean
+        passwordResetRequired:
+          type: boolean
+        createdAt:
+          type: string
+      required:
+        - id
+        - name
+        - color
+        - avatar
+        - birthday
+        - role
+        - sortOrder
+        - hasPassword
+        - hasPasskeys
+        - passwordResetRequired
+        - createdAt
+    MemberCreate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        color:
+          type: string
+          pattern: ^#[0-9a-fA-F]{6}$
+        role:
+          $ref: "#/components/schemas/Role"
+        avatar:
+          type: string
+          nullable: true
+          maxLength: 400000
+          pattern: ^data:image\/(jpeg|png|webp);base64,
+        birthday:
+          type: string
+          nullable: true
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 100000
+      required:
+        - name
+        - color
+    MemberUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        color:
+          type: string
+          pattern: ^#[0-9a-fA-F]{6}$
+        role:
+          $ref: "#/components/schemas/Role"
+        avatar:
+          type: string
+          nullable: true
+          maxLength: 400000
+          pattern: ^data:image\/(jpeg|png|webp);base64,
+        birthday:
+          type: string
+          nullable: true
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 100000
+    SetPasswordRequest:
+      type: object
+      properties:
+        password:
+          type: string
+          minLength: 8
+          maxLength: 200
+      required:
+        - password
+    PasskeyList:
+      type: object
+      properties:
+        passkeys:
+          type: array
+          items:
+            $ref: "#/components/schemas/Passkey"
+      required:
+        - passkeys
+    Passkey:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - label
+        - createdAt
+    Household:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        tz:
+          type: string
+          example: Europe/Warsaw
+        weatherLocation:
+          type: object
+          nullable: true
+          properties:
+            lat:
+              type: number
+              minimum: -90
+              maximum: 90
+            lon:
+              type: number
+              minimum: -180
+              maximum: 180
+            label:
+              type: string
+              minLength: 1
+              maxLength: 80
+          required:
+            - lat
+            - lon
+            - label
+        createdAt:
+          type: string
+      required:
+        - id
+        - name
+        - tz
+        - weatherLocation
+        - createdAt
+    HouseholdUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        tz:
+          type: string
+          minLength: 1
+        weatherLocation:
+          type: object
+          nullable: true
+          properties:
+            lat:
+              type: number
+              minimum: -90
+              maximum: 90
+            lon:
+              type: number
+              minimum: -180
+              maximum: 180
+            label:
+              type: string
+              minLength: 1
+              maxLength: 80
+          required:
+            - lat
+            - lon
+            - label
+    CalendarAccountList:
+      type: object
+      properties:
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/CalendarAccount"
+      required:
+        - accounts
+    CalendarAccount:
+      type: object
+      properties:
+        id:
+          type: string
+        ownerMemberId:
+          type: string
+          nullable: true
+        provider:
+          $ref: "#/components/schemas/CalDavProvider"
+        label:
+          type: string
+        username:
+          type: string
+        serverUrl:
+          type: string
+          nullable: true
+        authError:
+          type: string
+          nullable: true
+        authBackoffUntil:
+          type: string
+          nullable: true
+        lastSyncAt:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - ownerMemberId
+        - provider
+        - label
+        - username
+        - serverUrl
+        - authError
+        - authBackoffUntil
+        - lastSyncAt
+        - createdAt
+    CalDavProvider:
+      type: string
+      enum:
+        - icloud
+        - caldav
+    CalendarAccountCreate:
+      type: object
+      properties:
+        ownerMemberId:
+          type: string
+        provider:
+          $ref: "#/components/schemas/CalDavProvider"
+        label:
+          type: string
+          minLength: 1
+          maxLength: 80
+        username:
+          type: string
+          minLength: 1
+          maxLength: 200
+        appPassword:
+          type: string
+          minLength: 1
+          maxLength: 200
+        serverUrl:
+          type: string
+          maxLength: 500
+          format: uri
+      required:
+        - provider
+        - username
+        - appPassword
+    CalendarAccountUpdate:
+      type: object
+      properties:
+        label:
+          type: string
+          minLength: 1
+          maxLength: 80
+        username:
+          type: string
+          minLength: 1
+          maxLength: 200
+        appPassword:
+          type: string
+          minLength: 1
+          maxLength: 200
+        serverUrl:
+          type: string
+          maxLength: 500
+          format: uri
+    SyncQueued:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - queued
+      required:
+        - status
+    SyncRequest:
+      type: object
+      properties:
+        force:
+          type: boolean
+          default: false
+    CalendarList:
+      type: object
+      properties:
+        calendars:
+          type: array
+          items:
+            $ref: "#/components/schemas/Calendar"
+      required:
+        - calendars
+    Calendar:
+      type: object
+      properties:
+        id:
+          type: string
+        accountId:
+          type: string
+          nullable: true
+        ownerMemberId:
+          type: string
+          nullable: true
+        displayName:
+          type: string
+        color:
+          type: string
+          nullable: true
+        providerColor:
+          type: string
+          nullable: true
+        memberId:
+          type: string
+          nullable: true
+        enabled:
+          type: boolean
+        writable:
+          type: boolean
+        lastSyncAt:
+          type: string
+          nullable: true
+        lastSyncError:
+          type: string
+          nullable: true
+        eventCount:
+          type: integer
+        createdAt:
+          type: string
+      required:
+        - id
+        - accountId
+        - ownerMemberId
+        - displayName
+        - color
+        - providerColor
+        - memberId
+        - enabled
+        - writable
+        - lastSyncAt
+        - lastSyncError
+        - eventCount
+        - createdAt
+    CalendarCreate:
+      type: object
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        color:
+          type: string
+          nullable: true
+          pattern: ^#[0-9a-fA-F]{6}$
+        memberId:
+          type: string
+          nullable: true
+          maxLength: 64
+      required:
+        - displayName
+    CalendarUpdate:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        writable:
+          type: boolean
+        memberId:
+          type: string
+          nullable: true
+          maxLength: 64
+        color:
+          type: string
+          nullable: true
+          pattern: ^#[0-9a-fA-F]{6}$
+    EventOccurrenceList:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/EventOccurrence"
+      required:
+        - events
+    EventOccurrence:
+      type: object
+      properties:
+        id:
+          type: string
+        eventId:
+          type: string
+        calendarId:
+          type: string
+        summary:
+          type: string
+        location:
+          type: string
+          nullable: true
+        allDay:
+          type: boolean
+        startsAt:
+          type: string
+          nullable: true
+        endsAt:
+          type: string
+          nullable: true
+        startDate:
+          type: string
+          nullable: true
+        endDate:
+          type: string
+          nullable: true
+        memberIds:
+          type: array
+          nullable: true
+          items:
+            type: string
+        color:
+          type: string
+          nullable: true
+        recurrence:
+          type: object
+          nullable: true
+          properties:
+            freq:
+              type: string
+              enum:
+                - daily
+                - weekly
+                - monthly
+                - yearly
+            interval:
+              type: integer
+              minimum: 1
+              maximum: 365
+            byWeekday:
+              type: array
+              items:
+                type: string
+                enum:
+                  - mo
+                  - tu
+                  - we
+                  - th
+                  - fr
+                  - sa
+                  - su
+              maxItems: 7
+            byMonthDay:
+              type: integer
+              minimum: 1
+              maximum: 31
+            until:
+              type: string
+              pattern: ^\d{4}-\d{2}-\d{2}$
+          required:
+            - freq
+      required:
+        - id
+        - eventId
+        - calendarId
+        - summary
+        - location
+        - allDay
+        - startsAt
+        - endsAt
+        - startDate
+        - endDate
+        - memberIds
+        - color
+        - recurrence
+    EventCreated:
+      type: object
+      properties:
+        id:
+          type: string
+        calendarId:
+          type: string
+        summary:
+          type: string
+        syncStatus:
+          type: string
+          enum:
+            - local
+            - push-pending
+      required:
+        - id
+        - calendarId
+        - summary
+        - syncStatus
+    EventCreate:
+      type: object
+      properties:
+        calendarId:
+          type: string
+          maxLength: 64
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 200
+        location:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 2000
+        memberIds:
+          type: array
+          nullable: true
+          items:
+            type: string
+            maxLength: 64
+          maxItems: 20
+        allDay:
+          type: boolean
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        startDate:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        endDate:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        recurrence:
+          type: object
+          nullable: true
+          properties:
+            freq:
+              type: string
+              enum:
+                - daily
+                - weekly
+                - monthly
+                - yearly
+            interval:
+              type: integer
+              minimum: 1
+              maximum: 365
+            byWeekday:
+              type: array
+              items:
+                type: string
+                enum:
+                  - mo
+                  - tu
+                  - we
+                  - th
+                  - fr
+                  - sa
+                  - su
+              maxItems: 7
+            byMonthDay:
+              type: integer
+              minimum: 1
+              maximum: 31
+            until:
+              type: string
+              pattern: ^\d{4}-\d{2}-\d{2}$
+          required:
+            - freq
+      required:
+        - calendarId
+        - summary
+        - allDay
+    EventUpdate:
+      type: object
+      properties:
+        summary:
+          type: string
+          minLength: 1
+          maxLength: 200
+        location:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 2000
+        memberIds:
+          type: array
+          nullable: true
+          items:
+            type: string
+            maxLength: 64
+          maxItems: 20
+        allDay:
+          type: boolean
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        startDate:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        endDate:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        recurrence:
+          type: object
+          nullable: true
+          properties:
+            freq:
+              type: string
+              enum:
+                - daily
+                - weekly
+                - monthly
+                - yearly
+            interval:
+              type: integer
+              minimum: 1
+              maximum: 365
+            byWeekday:
+              type: array
+              items:
+                type: string
+                enum:
+                  - mo
+                  - tu
+                  - we
+                  - th
+                  - fr
+                  - sa
+                  - su
+              maxItems: 7
+            byMonthDay:
+              type: integer
+              minimum: 1
+              maximum: 31
+            until:
+              type: string
+              pattern: ^\d{4}-\d{2}-\d{2}$
+          required:
+            - freq
+      required:
+        - summary
+        - allDay
+    EventMembersUpdate:
+      type: object
+      properties:
+        memberIds:
+          type: array
+          nullable: true
+          items:
+            type: string
+            maxLength: 64
+          maxItems: 20
+      required:
+        - memberIds
+    WeatherResponse:
+      type: object
+      properties:
+        weather:
+          type: object
+          nullable: true
+          properties:
+            label:
+              type: string
+            fetchedAt:
+              type: string
+            current:
+              type: object
+              properties:
+                tempC:
+                  type: number
+                code:
+                  type: integer
+                isDay:
+                  type: boolean
+              required:
+                - tempC
+                - code
+                - isDay
+            daily:
+              type: array
+              items:
+                type: object
+                properties:
+                  date:
+                    type: string
+                    pattern: ^\d{4}-\d{2}-\d{2}$
+                  code:
+                    type: integer
+                  tempMinC:
+                    type: number
+                  tempMaxC:
+                    type: number
+                required:
+                  - date
+                  - code
+                  - tempMinC
+                  - tempMaxC
+          required:
+            - label
+            - fetchedAt
+            - current
+            - daily
+      required:
+        - weather
+    ChoreList:
+      type: object
+      properties:
+        chores:
+          type: array
+          items:
+            $ref: "#/components/schemas/Chore"
+      required:
+        - chores
+    Chore:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        notes:
+          type: string
+          nullable: true
+        emoji:
+          type: string
+          nullable: true
+        starValue:
+          type: integer
+        upForGrabs:
+          type: boolean
+        dueDate:
+          type: string
+          nullable: true
+        dueMode:
+          type: string
+          nullable: true
+          enum:
+            - on
+            - by
+            - null
+        dueTime:
+          type: string
+          nullable: true
+        recurrence:
+          type: object
+          nullable: true
+          properties:
+            freq:
+              type: string
+              enum:
+                - daily
+                - weekly
+                - monthly
+            interval:
+              type: integer
+              minimum: 1
+              maximum: 365
+            byWeekday:
+              type: array
+              items:
+                type: string
+                enum:
+                  - mo
+                  - tu
+                  - we
+                  - th
+                  - fr
+                  - sa
+                  - su
+              maxItems: 7
+            byMonthDay:
+              type: integer
+              minimum: 1
+              maximum: 31
+            startDate:
+              type: string
+              pattern: ^\d{4}-\d{2}-\d{2}$
+            endDate:
+              type: string
+              pattern: ^\d{4}-\d{2}-\d{2}$
+          required:
+            - freq
+            - startDate
+        assigneeIds:
+          type: array
+          items:
+            type: string
+        sortOrder:
+          type: integer
+        createdAt:
+          type: string
+      required:
+        - id
+        - title
+        - notes
+        - emoji
+        - starValue
+        - upForGrabs
+        - dueDate
+        - dueMode
+        - dueTime
+        - recurrence
+        - assigneeIds
+        - sortOrder
+        - createdAt
+    ChoreCreate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        notes:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 1000
+        emoji:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 16
+        starValue:
+          type: integer
+          minimum: 0
+          maximum: 100
+        upForGrabs:
+          type: boolean
+        dueDate:
+          type: string
+          nullable: true
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        dueMode:
+          type: string
+          nullable: true
+          enum:
+            - on
+            - by
+            - null
+        dueTime:
+          type: string
+          nullable: true
+          pattern: ^([01]\d|2[0-3]):[0-5]\d$
+        recurrence:
+          type: object
+          nullable: true
+          properties:
+            freq:
+              type: string
+              enum:
+                - daily
+                - weekly
+                - monthly
+            interval:
+              type: integer
+              minimum: 1
+              maximum: 365
+            byWeekday:
+              type: array
+              items:
+                type: string
+                enum:
+                  - mo
+                  - tu
+                  - we
+                  - th
+                  - fr
+                  - sa
+                  - su
+              maxItems: 7
+            byMonthDay:
+              type: integer
+              minimum: 1
+              maximum: 31
+            startDate:
+              type: string
+              pattern: ^\d{4}-\d{2}-\d{2}$
+            endDate:
+              type: string
+              pattern: ^\d{4}-\d{2}-\d{2}$
+          required:
+            - freq
+            - startDate
+        assigneeIds:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+          maxItems: 20
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 10000
+      required:
+        - title
+    ChoreUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        notes:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 1000
+        emoji:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 16
+        starValue:
+          type: integer
+          minimum: 0
+          maximum: 100
+        upForGrabs:
+          type: boolean
+        dueDate:
+          type: string
+          nullable: true
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        dueMode:
+          type: string
+          nullable: true
+          enum:
+            - on
+            - by
+            - null
+        dueTime:
+          type: string
+          nullable: true
+          pattern: ^([01]\d|2[0-3]):[0-5]\d$
+        recurrence:
+          type: object
+          nullable: true
+          properties:
+            freq:
+              type: string
+              enum:
+                - daily
+                - weekly
+                - monthly
+            interval:
+              type: integer
+              minimum: 1
+              maximum: 365
+            byWeekday:
+              type: array
+              items:
+                type: string
+                enum:
+                  - mo
+                  - tu
+                  - we
+                  - th
+                  - fr
+                  - sa
+                  - su
+              maxItems: 7
+            byMonthDay:
+              type: integer
+              minimum: 1
+              maximum: 31
+            startDate:
+              type: string
+              pattern: ^\d{4}-\d{2}-\d{2}$
+            endDate:
+              type: string
+              pattern: ^\d{4}-\d{2}-\d{2}$
+          required:
+            - freq
+            - startDate
+        assigneeIds:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+          maxItems: 20
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 10000
+    ChoreOccurrenceList:
+      type: object
+      properties:
+        occurrences:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChoreOccurrence"
+      required:
+        - occurrences
+    ChoreOccurrence:
+      type: object
+      properties:
+        id:
+          type: string
+        choreId:
+          type: string
+        title:
+          type: string
+        emoji:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        starValue:
+          type: integer
+        upForGrabs:
+          type: boolean
+        dueDate:
+          type: string
+          nullable: true
+        dueMode:
+          type: string
+          nullable: true
+          enum:
+            - on
+            - by
+            - null
+        dueTime:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+            - open
+            - completed
+        late:
+          type: boolean
+        assigneeMemberId:
+          type: string
+          nullable: true
+        claimedByMemberId:
+          type: string
+          nullable: true
+        completedByMemberId:
+          type: string
+          nullable: true
+        completedAt:
+          type: string
+          nullable: true
+      required:
+        - id
+        - choreId
+        - title
+        - emoji
+        - notes
+        - starValue
+        - upForGrabs
+        - dueDate
+        - dueMode
+        - dueTime
+        - status
+        - late
+        - assigneeMemberId
+        - claimedByMemberId
+        - completedByMemberId
+        - completedAt
+    ChoreActionResult:
+      type: object
+      properties:
+        occurrence:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: string
+            choreId:
+              type: string
+            title:
+              type: string
+            emoji:
+              type: string
+              nullable: true
+            notes:
+              type: string
+              nullable: true
+            starValue:
+              type: integer
+            upForGrabs:
+              type: boolean
+            dueDate:
+              type: string
+              nullable: true
+            dueMode:
+              type: string
+              nullable: true
+              enum:
+                - on
+                - by
+                - null
+            dueTime:
+              type: string
+              nullable: true
+            status:
+              type: string
+              enum:
+                - open
+                - completed
+            late:
+              type: boolean
+            assigneeMemberId:
+              type: string
+              nullable: true
+            claimedByMemberId:
+              type: string
+              nullable: true
+            completedByMemberId:
+              type: string
+              nullable: true
+            completedAt:
+              type: string
+              nullable: true
+          required:
+            - id
+            - choreId
+            - title
+            - emoji
+            - notes
+            - starValue
+            - upForGrabs
+            - dueDate
+            - dueMode
+            - dueTime
+            - status
+            - late
+            - assigneeMemberId
+            - claimedByMemberId
+            - completedByMemberId
+            - completedAt
+        starsAwarded:
+          type: integer
+      required:
+        - occurrence
+        - starsAwarded
+    ChoreAction:
+      type: object
+      properties:
+        asMemberId:
+          type: string
+          maxLength: 64
+    ChoreHistoryList:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChoreHistoryEntry"
+        nextBefore:
+          type: string
+          nullable: true
+      required:
+        - entries
+        - nextBefore
+    ChoreHistoryEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        choreId:
+          type: string
+        title:
+          type: string
+        emoji:
+          type: string
+          nullable: true
+        action:
+          type: string
+          enum:
+            - completed
+            - dismissed
+        occurredAt:
+          type: string
+        dueDate:
+          type: string
+          nullable: true
+        memberId:
+          type: string
+          nullable: true
+        completedByMemberId:
+          type: string
+          nullable: true
+        starsAwarded:
+          type: integer
+      required:
+        - id
+        - choreId
+        - title
+        - emoji
+        - action
+        - occurredAt
+        - dueDate
+        - memberId
+        - completedByMemberId
+        - starsAwarded
+    RoutineBoard:
+      type: object
+      properties:
+        date:
+          type: string
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoutineBoardEntry"
+      required:
+        - date
+        - entries
+    RoutineBoardEntry:
+      type: object
+      properties:
+        routineId:
+          type: string
+        title:
+          type: string
+        emoji:
+          type: string
+          nullable: true
+        windowStart:
+          type: string
+        windowEnd:
+          type: string
+        memberId:
+          type: string
+        complete:
+          type: boolean
+        streak:
+          type: integer
+        tasks:
+          type: array
+          items:
+            type: object
+            properties:
+              taskId:
+                type: string
+              title:
+                type: string
+              emoji:
+                type: string
+                nullable: true
+              starValue:
+                type: integer
+              status:
+                type: string
+                enum:
+                  - open
+                  - completed
+                  - skipped
+              completedByMemberId:
+                type: string
+                nullable: true
+              completedAt:
+                type: string
+                nullable: true
+            required:
+              - taskId
+              - title
+              - emoji
+              - starValue
+              - status
+              - completedByMemberId
+              - completedAt
+      required:
+        - routineId
+        - title
+        - emoji
+        - windowStart
+        - windowEnd
+        - memberId
+        - complete
+        - streak
+        - tasks
+    RoutineTaskActionResult:
+      type: object
+      properties:
+        entry:
+          type: object
+          nullable: true
+          properties:
+            routineId:
+              type: string
+            title:
+              type: string
+            emoji:
+              type: string
+              nullable: true
+            windowStart:
+              type: string
+            windowEnd:
+              type: string
+            memberId:
+              type: string
+            complete:
+              type: boolean
+            streak:
+              type: integer
+            tasks:
+              type: array
+              items:
+                type: object
+                properties:
+                  taskId:
+                    type: string
+                  title:
+                    type: string
+                  emoji:
+                    type: string
+                    nullable: true
+                  starValue:
+                    type: integer
+                  status:
+                    type: string
+                    enum:
+                      - open
+                      - completed
+                      - skipped
+                  completedByMemberId:
+                    type: string
+                    nullable: true
+                  completedAt:
+                    type: string
+                    nullable: true
+                required:
+                  - taskId
+                  - title
+                  - emoji
+                  - starValue
+                  - status
+                  - completedByMemberId
+                  - completedAt
+          required:
+            - routineId
+            - title
+            - emoji
+            - windowStart
+            - windowEnd
+            - memberId
+            - complete
+            - streak
+            - tasks
+        starsAwarded:
+          type: integer
+      required:
+        - entry
+        - starsAwarded
+    RoutineTaskAction:
+      type: object
+      properties:
+        date:
+          type: string
+          pattern: ^\d{4}-\d{2}-\d{2}$
+        memberId:
+          type: string
+          maxLength: 64
+      required:
+        - date
+    RoutineList:
+      type: object
+      properties:
+        routines:
+          type: array
+          items:
+            $ref: "#/components/schemas/Routine"
+      required:
+        - routines
+    Routine:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        emoji:
+          type: string
+          nullable: true
+        windowStart:
+          type: string
+        windowEnd:
+          type: string
+        byWeekday:
+          type: array
+          nullable: true
+          items:
+            type: string
+            enum:
+              - mo
+              - tu
+              - we
+              - th
+              - fr
+              - sa
+              - su
+        assigneeIds:
+          type: array
+          items:
+            type: string
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoutineTask"
+        sortOrder:
+          type: integer
+        createdAt:
+          type: string
+      required:
+        - id
+        - title
+        - emoji
+        - windowStart
+        - windowEnd
+        - byWeekday
+        - assigneeIds
+        - tasks
+        - sortOrder
+        - createdAt
+    RoutineTask:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        emoji:
+          type: string
+          nullable: true
+        starValue:
+          type: integer
+        sortOrder:
+          type: integer
+      required:
+        - id
+        - title
+        - emoji
+        - starValue
+        - sortOrder
+    RoutineCreate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        emoji:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 16
+        windowStart:
+          type: string
+          pattern: ^([01]\d|2[0-3]):[0-5]\d$
+        windowEnd:
+          type: string
+          pattern: ^([01]\d|2[0-3]):[0-5]\d$
+        byWeekday:
+          type: array
+          nullable: true
+          items:
+            type: string
+            enum:
+              - mo
+              - tu
+              - we
+              - th
+              - fr
+              - sa
+              - su
+          maxItems: 7
+        assigneeIds:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+          maxItems: 20
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoutineTaskCreate"
+          maxItems: 30
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 10000
+      required:
+        - title
+        - windowStart
+        - windowEnd
+        - assigneeIds
+    RoutineTaskCreate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        emoji:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 16
+        starValue:
+          type: integer
+          minimum: 0
+          maximum: 100
+      required:
+        - title
+    RoutineUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        emoji:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 16
+        windowStart:
+          type: string
+          pattern: ^([01]\d|2[0-3]):[0-5]\d$
+        windowEnd:
+          type: string
+          pattern: ^([01]\d|2[0-3]):[0-5]\d$
+        byWeekday:
+          type: array
+          nullable: true
+          items:
+            type: string
+            enum:
+              - mo
+              - tu
+              - we
+              - th
+              - fr
+              - sa
+              - su
+          maxItems: 7
+        assigneeIds:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+          maxItems: 20
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/RoutineTaskInput"
+          maxItems: 30
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 10000
+    RoutineTaskInput:
+      type: object
+      properties:
+        id:
+          type: string
+          maxLength: 64
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        emoji:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 16
+        starValue:
+          type: integer
+          minimum: 0
+          maximum: 100
+      required:
+        - title
+    RewardList:
+      type: object
+      properties:
+        rewards:
+          type: array
+          items:
+            $ref: "#/components/schemas/Reward"
+      required:
+        - rewards
+    Reward:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        emoji:
+          type: string
+          nullable: true
+        costStars:
+          type: integer
+        sortOrder:
+          type: integer
+        createdAt:
+          type: string
+      required:
+        - id
+        - title
+        - emoji
+        - costStars
+        - sortOrder
+        - createdAt
+    RewardCreate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        emoji:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 16
+        costStars:
+          type: integer
+          minimum: 1
+          maximum: 500
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 10000
+      required:
+        - title
+        - costStars
+    RewardUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        emoji:
+          type: string
+          nullable: true
+          minLength: 1
+          maxLength: 16
+        costStars:
+          type: integer
+          minimum: 1
+          maximum: 500
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 10000
+    RedeemResult:
+      type: object
+      properties:
+        redemption:
+          type: object
+          properties:
+            id:
+              type: string
+            rewardId:
+              type: string
+              nullable: true
+            memberId:
+              type: string
+            title:
+              type: string
+            emoji:
+              type: string
+              nullable: true
+            costStars:
+              type: integer
+            status:
+              type: string
+              enum:
+                - redeemed
+                - fulfilled
+            redeemedByMemberId:
+              type: string
+              nullable: true
+            fulfilledByMemberId:
+              type: string
+              nullable: true
+            fulfilledAt:
+              type: string
+              nullable: true
+            createdAt:
+              type: string
+          required:
+            - id
+            - rewardId
+            - memberId
+            - title
+            - emoji
+            - costStars
+            - status
+            - redeemedByMemberId
+            - fulfilledByMemberId
+            - fulfilledAt
+            - createdAt
+        balance:
+          type: integer
+      required:
+        - redemption
+        - balance
+    RedeemRequest:
+      type: object
+      properties:
+        memberId:
+          type: string
+          maxLength: 64
+    RewardRedemptionList:
+      type: object
+      properties:
+        redemptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/RewardRedemption"
+      required:
+        - redemptions
+    RewardRedemption:
+      type: object
+      properties:
+        id:
+          type: string
+        rewardId:
+          type: string
+          nullable: true
+        memberId:
+          type: string
+        title:
+          type: string
+        emoji:
+          type: string
+          nullable: true
+        costStars:
+          type: integer
+        status:
+          type: string
+          enum:
+            - redeemed
+            - fulfilled
+        redeemedByMemberId:
+          type: string
+          nullable: true
+        fulfilledByMemberId:
+          type: string
+          nullable: true
+        fulfilledAt:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - rewardId
+        - memberId
+        - title
+        - emoji
+        - costStars
+        - status
+        - redeemedByMemberId
+        - fulfilledByMemberId
+        - fulfilledAt
+        - createdAt
+    ReturnResult:
+      type: object
+      properties:
+        balance:
+          type: integer
+      required:
+        - balance
+    StarBalanceList:
+      type: object
+      properties:
+        balances:
+          type: array
+          items:
+            $ref: "#/components/schemas/StarBalance"
+      required:
+        - balances
+    StarBalance:
+      type: object
+      properties:
+        memberId:
+          type: string
+        balance:
+          type: integer
+      required:
+        - memberId
+        - balance
+    StarLedgerList:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/StarLedgerEntry"
+      required:
+        - entries
+    StarLedgerEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        memberId:
+          type: string
+        delta:
+          type: integer
+        reason:
+          type: string
+          enum:
+            - chore
+            - routine_task
+            - reward
+            - adjustment
+        refId:
+          type: string
+          nullable: true
+        note:
+          type: string
+          nullable: true
+        createdByMemberId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - memberId
+        - delta
+        - reason
+        - refId
+        - note
+        - createdByMemberId
+        - createdAt
+    StarAdjust:
+      type: object
+      properties:
+        memberId:
+          type: string
+          maxLength: 64
+        delta:
+          type: integer
+          minimum: -1000
+          maximum: 1000
+        note:
+          type: string
+          minLength: 1
+          maxLength: 200
+      required:
+        - memberId
+        - delta
+    VapidKey:
+      type: object
+      properties:
+        publicKey:
+          type: string
+      required:
+        - publicKey
+    Device:
+      type: object
+      properties:
+        id:
+          type: string
+        memberId:
+          type: string
+        platform:
+          type: string
+          enum:
+            - ios
+        token:
+          type: string
+        createdAt:
+          type: string
+      required:
+        - id
+        - memberId
+        - platform
+        - token
+        - createdAt
+    DeviceRegister:
+      type: object
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 512
+        platform:
+          type: string
+          enum:
+            - ios
+      required:
+        - token
+        - platform
+    DeviceDelete:
+      type: object
+      properties:
+        token:
+          type: string
+          minLength: 1
+          maxLength: 512
+      required:
+        - token
+    PushSubscription:
+      type: object
+      properties:
+        id:
+          type: string
+        memberId:
+          type: string
+          nullable: true
+        endpoint:
+          type: string
+        createdAt:
+          type: string
+      required:
+        - id
+        - memberId
+        - endpoint
+        - createdAt
+    PushSubscriptionCreate:
+      type: object
+      properties:
+        endpoint:
+          type: string
+          maxLength: 2048
+          format: uri
+        keys:
+          type: object
+          properties:
+            p256dh:
+              type: string
+              minLength: 1
+              maxLength: 256
+            auth:
+              type: string
+              minLength: 1
+              maxLength: 256
+          required:
+            - p256dh
+            - auth
+      required:
+        - endpoint
+        - keys
+    PushSubscriptionList:
+      type: object
+      properties:
+        subscriptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PushSubscription"
+      required:
+        - subscriptions
+    PushSubscriptionDelete:
+      type: object
+      properties:
+        endpoint:
+          type: string
+          minLength: 1
+          maxLength: 2048
+      required:
+        - endpoint
+  parameters: {}
+paths:
+  /api/v1/health:
+    get:
+      operationId: getHealth
+      summary: Service health
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "500":
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/auth/setup:
+    post:
+      operationId: setupHousehold
+      summary: First-run household setup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupRequest"
+      responses:
+        "201":
+          description: Household created; family session established
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "403":
+          description: Caller is outside FAMILY_LOGIN_NETWORKS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: A household already exists (v1 = one household per install)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed or unknown timezone
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/auth/identities:
+    get:
+      operationId: listIdentities
+      summary: Login-screen identity list (unauthenticated)
+      responses:
+        "200":
+          description: Household members with available login methods
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentitiesResponse"
+  /api/v1/auth/network:
+    get:
+      operationId: getNetworkInfo
+      summary: Whether family/service login is allowed from the caller IP
+      responses:
+        "200":
+          description: Network fencing verdict for the caller
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkInfo"
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      summary: Password login (family, member, or service scope)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Family/service login is fenced to FAMILY_LOGIN_NETWORKS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed (e.g. memberId missing for scope=member)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Too many failed attempts; Retry-After header carries the wait in
+            seconds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "501":
+          description: Service login disabled (no SERVICE_PASSWORD configured)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: No household configured yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/auth/password-setup:
+    post:
+      operationId: claimPasswordSetup
+      summary: First-login / post-reset password claim (armed members only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordSetupRequest"
+      responses:
+        "200":
+          description: Password set; member session established
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "401":
+          description: Family password incorrect
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Claiming a tile is fenced to FAMILY_LOGIN_NETWORKS, like family login
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Member not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Member is not armed for setup (setup_not_allowed) — an admin resets
+            first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Too many failed attempts; Retry-After header carries the wait in
+            seconds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: No household configured yet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      summary: Delete the current session
+      responses:
+        "204":
+          description: Session deleted and cookie cleared
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/auth/session:
+    get:
+      operationId: getSession
+      summary: Current session info
+      responses:
+        "200":
+          description: The authenticated session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionInfo"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/auth/webauthn/register/options:
+    post:
+      operationId: createPasskeyRegistrationOptions
+      summary: Start passkey registration for a member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebAuthnOptionsRequest"
+      responses:
+        "200":
+          description: Registration ceremony options
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebAuthnOptionsResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Only the member themself or an admin may register
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Member not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "501":
+          description: Passkeys not configured (WEBAUTHN_RP_ID/WEBAUTHN_ORIGIN unset)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/auth/webauthn/register/verify:
+    post:
+      operationId: verifyPasskeyRegistration
+      summary: Finish passkey registration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebAuthnRegisterVerifyRequest"
+      responses:
+        "201":
+          description: Passkey stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebAuthnCredentialCreated"
+        "400":
+          description: Unknown/expired challenge or verification failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Only the member themself or an admin may register
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "501":
+          description: Passkeys not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/auth/webauthn/login/options:
+    post:
+      operationId: createPasskeyLoginOptions
+      summary: Start passkey login for a member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebAuthnOptionsRequest"
+      responses:
+        "200":
+          description: Authentication ceremony options
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebAuthnOptionsResponse"
+        "401":
+          description: Member has no passkeys (same shape as any credential failure)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Too many failed attempts; Retry-After header carries the wait in
+            seconds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "501":
+          description: Passkeys not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/auth/webauthn/login/verify:
+    post:
+      operationId: verifyPasskeyLogin
+      summary: Finish passkey login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebAuthnLoginVerifyRequest"
+      responses:
+        "200":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Too many failed attempts; Retry-After header carries the wait in
+            seconds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "501":
+          description: Passkeys not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/members:
+    get:
+      operationId: listMembers
+      summary: List household members
+      responses:
+        "200":
+          description: Members in the caller household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemberList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createMember
+      summary: Create a member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberCreate"
+      responses:
+        "201":
+          description: Member created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Member"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required; creating a mom/dad additionally needs a parent
+            session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/members/{id}:
+    get:
+      operationId: getMember
+      summary: Get a member
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: The member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Member"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Member not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    patch:
+      operationId: updateMember
+      summary: Update a member
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberUpdate"
+      responses:
+        "200":
+          description: The updated member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Member"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Not permitted to edit this member (or to change roles)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Member not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteMember
+      summary: Delete a member
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "204":
+          description: Member deleted
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required; deleting a mom/dad additionally needs a parent
+            session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Member not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/members/{id}/password:
+    put:
+      operationId: setMemberPassword
+      summary: Set or replace a member password
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetPasswordRequest"
+      responses:
+        "204":
+          description: Password set
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Only the member themself or an admin may set the password
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Member not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/members/{id}/password-reset:
+    post:
+      operationId: armMemberPasswordReset
+      summary: Invalidate a member password; they set a new one at next sign-in
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "204":
+          description: Old password dead, member armed for setup (family password + new
+            password at the login screen). Passkeys and existing sessions are
+            untouched.
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Not permitted — arming a PARENT is never a kiosk/family power
+            (anyone with the family password could claim the identity and their
+            private calendar accounts)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Member not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/members/{id}/passkeys:
+    get:
+      operationId: listMemberPasskeys
+      summary: List a member passkeys
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: The member passkeys
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasskeyList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Only the member themself or an admin may list passkeys
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Member not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/members/{id}/passkeys/{credId}:
+    delete:
+      operationId: deleteMemberPasskey
+      summary: Delete a member passkey
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+        - schema:
+            type: string
+          required: true
+          name: credId
+          in: path
+      responses:
+        "204":
+          description: Passkey deleted
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Only the member themself or an admin may delete passkeys
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Member or credential not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/household:
+    get:
+      operationId: getHousehold
+      summary: Get the household
+      responses:
+        "200":
+          description: The caller household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Household"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Household not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    patch:
+      operationId: updateHousehold
+      summary: Update the household
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HouseholdUpdate"
+      responses:
+        "200":
+          description: The updated household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Household"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed or unknown timezone
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/calendar-accounts:
+    get:
+      operationId: listCalendarAccounts
+      summary: List CalDAV accounts visible to the caller
+      responses:
+        "200":
+          description: The caller's accounts (parents also see kids'; service sees all)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalendarAccountList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Member session required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createCalendarAccount
+      summary: Connect a CalDAV account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CalendarAccountCreate"
+      responses:
+        "201":
+          description: Account created; the first sync is queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalendarAccount"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Member session required, or ownerMemberId not yours to assign
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: An account for the same provider, username and server already exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed, serverUrl inconsistent with the provider, or
+            unknown ownerMemberId
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/calendar-accounts/{id}:
+    patch:
+      operationId: updateCalendarAccount
+      summary: Update a CalDAV account
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CalendarAccountUpdate"
+      responses:
+        "200":
+          description: The updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalendarAccount"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Member session required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Account not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed or serverUrl sent for an icloud account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteCalendarAccount
+      summary: Disconnect a CalDAV account
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "204":
+          description: Account deleted (calendars, events and occurrences cascade)
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Member session required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Account not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/calendar-accounts/{id}/sync:
+    post:
+      operationId: syncCalendarAccount
+      summary: Queue a sync for an account
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncRequest"
+      responses:
+        "202":
+          description: Sync queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncQueued"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Member session required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Account not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/calendars:
+    get:
+      operationId: listCalendars
+      summary: List calendars
+      responses:
+        "200":
+          description: All calendars of the caller household, enabled and disabled
+            (settings UI needs both)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalendarList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createCalendar
+      summary: Create a Diane-local calendar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CalendarCreate"
+      responses:
+        "201":
+          description: The created local calendar (born enabled and writable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Calendar"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed or memberId is not a household member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/calendars/{id}:
+    patch:
+      operationId: updateCalendar
+      summary: Update a calendar (enable, member mapping, color)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CalendarUpdate"
+      responses:
+        "200":
+          description: The updated calendar
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Calendar"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Local calendars need an admin; synced calendars their account's
+            owner (parents for kids')
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Calendar not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed or memberId is not a household member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteCalendar
+      summary: Delete a Diane-local calendar (its events cascade)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "204":
+          description: Calendar and its events deleted
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Calendar not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: CalDAV calendars are removed by deleting their account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/events:
+    get:
+      operationId: listEvents
+      summary: List event occurrences in a local-date range
+      parameters:
+        - schema:
+            type: string
+            pattern: ^\d{4}-\d{2}-\d{2}$
+            example: 2026-07-01
+          required: true
+          name: from
+          in: query
+        - schema:
+            type: string
+            pattern: ^\d{4}-\d{2}-\d{2}$
+            example: 2026-08-01
+          required: true
+          name: to
+          in: query
+        - schema:
+            type: string
+            maxLength: 64
+          required: false
+          name: memberId
+          in: query
+      responses:
+        "200":
+          description: Occurrences of enabled calendars overlapping [from, to)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventOccurrenceList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Invalid or oversized date range
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createEvent
+      summary: Create an event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventCreate"
+      responses:
+        "201":
+          description: Event stored and expanded; on a CalDAV calendar the PUT to the
+            server is queued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventCreated"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Calendar not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Calendar is not writable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed, inconsistent times/recurrence, or unknown member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/events/{id}:
+    patch:
+      operationId: updateEvent
+      summary: Replace an event (local events only)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventUpdate"
+      responses:
+        "200":
+          description: Event replaced and re-expanded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventCreated"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Event not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Event is CalDAV-mastered (write-back is Phase 1.5)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Validation failed, inconsistent times/recurrence, or unknown member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteEvent
+      summary: Delete an event (local events only)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "204":
+          description: Event deleted (occurrences cascade)
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Event not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Event is CalDAV-mastered (write-back is Phase 1.5)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/events/{id}/members:
+    patch:
+      operationId: updateEventMembers
+      summary: Reassign an event to members (works on synced events too)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventMembersUpdate"
+      responses:
+        "200":
+          description: Members reassigned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventCreated"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Event not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: memberIds contains a non-member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/weather:
+    get:
+      operationId: getWeather
+      summary: Cached weather forecast
+      responses:
+        "200":
+          description: The cached forecast; null until a location is configured and the
+            first fetch lands
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WeatherResponse"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/chores:
+    get:
+      operationId: listChores
+      summary: List chore definitions
+      responses:
+        "200":
+          description: Every chore definition in the household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChoreList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createChore
+      summary: Create a chore definition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChoreCreate"
+      responses:
+        "201":
+          description: The created chore
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chore"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: invalid_schedule, invalid_assignees, or unknown_member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/chores/{id}:
+    patch:
+      operationId: updateChore
+      summary: Update a chore definition
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChoreUpdate"
+      responses:
+        "200":
+          description: The updated chore
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Chore"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Chore not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: invalid_schedule, invalid_assignees, or unknown_member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteChore
+      summary: Delete a chore (hard delete; earned stars survive in the ledger)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "204":
+          description: Chore and its resolution records deleted
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Chore not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/chore-occurrences:
+    get:
+      operationId: listChoreOccurrences
+      summary: The actionable chore view, or a calendar window with from/to
+      parameters:
+        - schema:
+            type: string
+            maxLength: 64
+          required: false
+          name: memberId
+          in: query
+        - schema:
+            type: string
+            pattern: ^\d{4}-\d{2}-\d{2}$
+          required: false
+          name: from
+          in: query
+        - schema:
+            type: string
+            pattern: ^\d{4}-\d{2}-\d{2}$
+          required: false
+          name: to
+          in: query
+      responses:
+        "200":
+          description: "Without from/to: every chore's current occurrence plus today's
+            completions. With from/to: scheduled dates in range projected per
+            day (future previews + completed marks; anytime chores excluded)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChoreOccurrenceList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: from/to must come together, ordered, spanning at most 100 days
+            (invalid_range)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/chore-occurrences/{id}/complete:
+    post:
+      operationId: completeChoreOccurrence
+      summary: Complete a chore occurrence (awards stars to its owner, once)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChoreAction"
+      responses:
+        "200":
+          description: "Completed (idempotent: an already-completed occurrence awards 0)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChoreActionResult"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Occurrence not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Nothing actionable to complete right now (not_actionable), or
+            claimed by someone else (already_claimed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: asMemberId is not a household member, or a pool occurrence needs
+            member_required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/chore-occurrences/{id}/uncomplete:
+    post:
+      operationId: uncompleteChoreOccurrence
+      summary: Undo a completion (or a dismissal) — back to open, award revoked
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChoreAction"
+      responses:
+        "200":
+          description: Reopened; the linked star award (if any) is revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChoreActionResult"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Occurrence not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Revoking the award would drive the balance negative
+            (insufficient_stars)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/chore-occurrences/{id}/dismiss:
+    post:
+      operationId: dismissChoreOccurrence
+      summary: Dismiss the current occurrence — no stars, gone from the actionable view
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChoreAction"
+      responses:
+        "200":
+          description: Dismissed (idempotent; occurrence becomes null in the view)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChoreActionResult"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Occurrence not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Completed occurrences are uncompleted, not dismissed
+            (already_completed); nothing actionable to dismiss (not_actionable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/chore-occurrences/{id}/claim:
+    post:
+      operationId: claimChoreOccurrence
+      summary: Claim an up-for-grabs occurrence
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChoreAction"
+      responses:
+        "200":
+          description: Claimed for the actor (idempotent when already theirs)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChoreActionResult"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Occurrence not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Assigned (not_claimable), already claimed by someone else
+            (already_claimed), or nothing actionable to claim (not_actionable)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: A family session must send asMemberId (member_required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/chore-occurrences/{id}/unclaim:
+    post:
+      operationId: unclaimChoreOccurrence
+      summary: Release a claimed up-for-grabs occurrence back to the pool
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChoreAction"
+      responses:
+        "200":
+          description: Back in the pool (idempotent when already unclaimed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChoreActionResult"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Occurrence not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/chore-history:
+    get:
+      operationId: listChoreHistory
+      summary: Completed and dismissed chores, newest first (live rows)
+      parameters:
+        - schema:
+            type: string
+            maxLength: 64
+          required: false
+          name: memberId
+          in: query
+        - schema:
+            type: string
+            pattern: ^\d{4}-\d{2}-\d{2}$
+          required: false
+          name: from
+          in: query
+        - schema:
+            type: string
+            pattern: ^\d{4}-\d{2}-\d{2}$
+          required: false
+          name: to
+          in: query
+        - schema:
+            type: string
+            pattern: ^\d{1,3}$
+          required: false
+          name: limit
+          in: query
+        - schema:
+            type: string
+            maxLength: 40
+          required: false
+          name: before
+          in: query
+      responses:
+        "200":
+          description: History entries in the window, with a nextBefore cursor for older
+            pages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChoreHistoryList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: from must not be after to (invalid_range)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/routines/board:
+    get:
+      operationId: getRoutineBoard
+      summary: "The routine board for a date (default: the household's today)"
+      parameters:
+        - schema:
+            type: string
+            pattern: ^\d{4}-\d{2}-\d{2}$
+          required: false
+          name: date
+          in: query
+        - schema:
+            type: string
+            maxLength: 64
+          required: false
+          name: memberId
+          in: query
+      responses:
+        "200":
+          description: One entry per routine × assignee scheduled that day, tasks with
+            their state, streak included
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutineBoard"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: date must be within the last 7 days and never future (invalid_date)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/routine-tasks/{id}/complete:
+    post:
+      operationId: completeRoutineTask
+      summary: Complete a routine task for a member's day (awards its stars once)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoutineTaskAction"
+      responses:
+        "200":
+          description: "Completed (idempotent: an already-completed task awards 0)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutineTaskActionResult"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Task not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: member_required, not_assignee, unknown_member, future_date,
+            too_old, or not_scheduled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/routine-tasks/{id}/skip:
+    post:
+      operationId: skipRoutineTask
+      summary: Skip a routine task — counts toward the day, earns nothing
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoutineTaskAction"
+      responses:
+        "200":
+          description: Skipped (idempotent)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutineTaskActionResult"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Task not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Completed tasks are uncompleted, not skipped (already_completed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: member_required, not_assignee, future_date, too_old, or not_scheduled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/routine-tasks/{id}/uncomplete:
+    post:
+      operationId: uncompleteRoutineTask
+      summary: Undo a completion or a skip — back to open, award revoked
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoutineTaskAction"
+      responses:
+        "200":
+          description: Reopened; the linked star award (if any) is revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutineTaskActionResult"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Task not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Revoking the award would drive the balance negative
+            (insufficient_stars)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: member_required, not_assignee, future_date, too_old, or not_scheduled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/routines:
+    get:
+      operationId: listRoutines
+      summary: List routine definitions
+      responses:
+        "200":
+          description: Every routine in the household, tasks in board order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RoutineList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createRoutine
+      summary: Create a routine (tasks in array order)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoutineCreate"
+      responses:
+        "201":
+          description: The created routine
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Routine"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: invalid_window, invalid_schedule, invalid_assignees, or
+            unknown_member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/routines/{id}:
+    patch:
+      operationId: updateRoutine
+      summary: Update a routine (assigneeIds/tasks are full replacements)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RoutineUpdate"
+      responses:
+        "200":
+          description: The updated routine
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Routine"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Routine not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: invalid_window, invalid_schedule, invalid_assignees,
+            unknown_member, or unknown_task
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteRoutine
+      summary: Delete a routine (hard delete; earned stars survive in the ledger)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "204":
+          description: Routine, its tasks, and their completions deleted
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Routine not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/rewards:
+    get:
+      operationId: listRewards
+      summary: The reward catalog
+      responses:
+        "200":
+          description: Every reward in the household, in display order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RewardList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createReward
+      summary: Create a reward
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RewardCreate"
+      responses:
+        "201":
+          description: The created reward
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reward"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/rewards/{id}:
+    patch:
+      operationId: updateReward
+      summary: Update a reward (existing redemptions keep their snapshots)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RewardUpdate"
+      responses:
+        "200":
+          description: The updated reward
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Reward"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Reward not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteReward
+      summary: Delete a reward (redemption history keeps its snapshots)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "204":
+          description: Reward deleted; redemptions survive with rewardId null
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Reward not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/rewards/{id}/redeem:
+    post:
+      operationId: redeemReward
+      summary: Spend a member's stars on a reward
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RedeemRequest"
+      responses:
+        "200":
+          description: Redeemed — the celebration moment (new balance included)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RedeemResult"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Reward not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Not enough stars (insufficient_stars)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: member_required (kiosk must name the spender) or unknown_member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/reward-redemptions:
+    get:
+      operationId: listRewardRedemptions
+      summary: Redemption history, newest first
+      parameters:
+        - schema:
+            type: string
+            maxLength: 64
+          required: false
+          name: memberId
+          in: query
+        - schema:
+            type: string
+            enum:
+              - redeemed
+              - fulfilled
+          required: false
+          name: status
+          in: query
+        - schema:
+            type: string
+            pattern: ^\d{1,3}$
+          required: false
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Redemptions (default 50, max 200), optionally by member/status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RewardRedemptionList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Malformed query
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/reward-redemptions/{id}/return:
+    post:
+      operationId: returnRedemption
+      summary: Return an unfulfilled redemption — the mis-click undo (stars refunded)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: Returned; the record and its ledger spend are gone
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReturnResult"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Redemption not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Already fulfilled — correct it with a star adjustment
+            (already_fulfilled)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/reward-redemptions/{id}/fulfill:
+    post:
+      operationId: fulfillRedemption
+      summary: Mark a redemption done in the real world (admin)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: Fulfilled (idempotent — an already-fulfilled row returns as-is)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RewardRedemption"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Redemption not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/stars/balances:
+    get:
+      operationId: getStarBalances
+      summary: Star balances for every household member
+      responses:
+        "200":
+          description: One entry per member (0 for members with no ledger history)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StarBalanceList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/stars/ledger:
+    get:
+      operationId: getStarLedger
+      summary: Recent star ledger entries, newest first
+      parameters:
+        - schema:
+            type: string
+            maxLength: 64
+          required: false
+          name: memberId
+          in: query
+        - schema:
+            type: string
+            pattern: ^\d{1,3}$
+          required: false
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: Ledger page (default 50, max 200 entries)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StarLedgerList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Malformed query
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/stars/adjust:
+    post:
+      operationId: adjustStars
+      summary: Manual star correction (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StarAdjust"
+      responses:
+        "200":
+          description: Adjustment recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StarLedgerList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Admin required
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Adjustment would drive the balance negative (insufficient_stars)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: memberId is not a household member, or delta is zero
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/push/vapid-key:
+    get:
+      operationId: getVapidKey
+      summary: The install's VAPID public key (generated lazily on first fetch)
+      responses:
+        "200":
+          description: The applicationServerKey for web-push subscribe
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VapidKey"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/devices:
+    post:
+      operationId: registerDevice
+      summary: Register this device for APNs pushes (member sessions only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceRegister"
+      responses:
+        "200":
+          description: The registration (a re-register moves the token to this member)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: A device is personal — family/kiosk and service sessions cannot
+            register one (member_required)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteDevice
+      summary: Unregister a device by token (sign-out flow)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceDelete"
+      responses:
+        "204":
+          description: Gone (idempotent — 204 whether or not a row matched)
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/push/subscriptions:
+    post:
+      operationId: createPushSubscription
+      summary: Register a web-push subscription (member-less for family/kiosk screens)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushSubscriptionCreate"
+      responses:
+        "200":
+          description: The subscription (a re-subscribe updates the rotated keys in place)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushSubscription"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    get:
+      operationId: listPushSubscriptions
+      summary: The household's registered web-push subscriptions
+      responses:
+        "200":
+          description: All subscriptions, newest first
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushSubscriptionList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deletePushSubscription
+      summary: Remove a web-push subscription by endpoint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushSubscriptionDelete"
+      responses:
+        "204":
+          description: Gone (idempotent — 204 whether or not a row matched)
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
