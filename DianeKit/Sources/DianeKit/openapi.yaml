@@ -307,6 +307,9 @@ components:
         birthday:
           type: string
           nullable: true
+        choreReminderTime:
+          type: string
+          nullable: true
         role:
           $ref: "#/components/schemas/Role"
         sortOrder:
@@ -325,6 +328,7 @@ components:
         - color
         - avatar
         - birthday
+        - choreReminderTime
         - role
         - sortOrder
         - hasPassword
@@ -380,6 +384,11 @@ components:
           type: string
           nullable: true
           pattern: ^\d{4}-\d{2}-\d{2}$
+        choreReminderTime:
+          type: string
+          nullable: true
+          pattern: ^([01]\d|2[0-3]):[0-5]\d$
+          example: 18:00
         sortOrder:
           type: integer
           minimum: 0

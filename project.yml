@@ -42,9 +42,12 @@ targets:
     entitlements:
       path: Diane/Diane.entitlements
       properties:
-        # Sandbox APNs — what Xcode-installed builds use. TestFlight/App Store
-        # builds are production; the server's APNS_PRODUCTION must match.
-        # Needs the paid Apple Developer team selected in Signing.
+        # Sandbox APNs — what Xcode-installed builds use; TestFlight/App Store
+        # builds are production and the server's APNS_PRODUCTION must match.
+        # Requires the PAID team in Signing & Capabilities: a personal team
+        # can't sign this, and Xcode then fails provisioning for the whole app.
+        # WITHOUT this entitlement iOS issues no device token at all, so the
+        # app never registers and the server has nothing to deliver to.
         aps-environment: development
 
   DianeTests:

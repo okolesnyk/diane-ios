@@ -143,4 +143,108 @@ import Testing
             #expect(!isTaskCancellation(URLError(.timedOut)))
         }
     }
+
+    // My own default chore-reminder time — per MEMBER, "HH:mm" or off.
+    @Suite struct ChoreReminderLogicTests {
+        @Test func everyMinuteOfTheDayRoundTrips() {
+            for hour in 0...23 {
+                for minute in 0...59 {
+                    guard let text = ChoreReminderLogic.format(hour: hour, minute: minute) else {
+                        Issue.record("no wire form for \(hour):\(minute)")
+                        continue
+                    }
+                    #expect(text.count == 5)
+                    #expect(ChoreReminderLogic.isValid(text))
+                    let parsed = ChoreReminderLogic.parse(text)
+                    #expect(parsed?.hour == hour)
+                    #expect(parsed?.minute == minute)
+                }
+            }
+        }
+
+        @Test func formatsZeroPadded() {
+            #expect(ChoreReminderLogic.format(hour: 9, minute: 5) == "09:05")
+            #expect(ChoreReminderLogic.format(hour: 0, minute: 0) == "00:00")
+            #expect(ChoreReminderLogic.format(hour: 23, minute: 59) == "23:59")
+        }
+
+        @Test func formatRefusesTimesThatAreNotOnTheClock() {
+            #expect(ChoreReminderLogic.format(hour: 24, minute: 0) == nil)
+            #expect(ChoreReminderLogic.format(hour: -1, minute: 0) == nil)
+            #expect(ChoreReminderLogic.format(hour: 12, minute: 60) == nil)
+            #expect(ChoreReminderLogic.format(hour: 12, minute: -1) == nil)
+        }
+
+        @Test func rejectsWhatTheServerRejects() {
+            for bad in ["9:00", "24:00", "ab:cd", "12:60", "1:2", "12:00:00", "", ":", "0800", "08:0", " 08:00", "08:00 ", "-1:00", "+8:00"] {
+                #expect(!ChoreReminderLogic.isValid(bad), "\(bad) must not be valid")
+                #expect(ChoreReminderLogic.parse(bad) == nil, "\(bad) must not parse")
+            }
+        }
+
+        // Stricter than ICU on purpose: zod's \d on the server is ASCII-only,
+        // so a full-width or Arabic-Indic "digit" would 422.
+        @Test func rejectsNonASCIIDigits() {
+            #expect(!ChoreReminderLogic.isValid("１８:００"))
+            #expect(!ChoreReminderLogic.isValid("١٨:٠٠"))
+            #expect(!ChoreReminderLogic.isValid("1８:00"))
+        }
+
+        // The wire contract, verbatim from MemberUpdate.choreReminderTime.
+        @Test func agreesWithTheServerPatternOnAnASCIICorpus() throws {
+            let regex = try NSRegularExpression(pattern: #"^([01]\d|2[0-3]):[0-5]\d$"#)
+            var corpus = ["", ":", "9:00", "ab:cd", "0800", "08:0", "12:00:00", "08:00 ", "-1:00"]
+            for hour in 0...25 {
+                for minute in [0, 9, 30, 59, 60] {
+                    corpus.append(String(format: "%02d:%02d", hour, minute))
+                }
+            }
+            for candidate in corpus {
+                let range = NSRange(candidate.startIndex..., in: candidate)
+                let serverAccepts = regex.firstMatch(in: candidate, range: range) != nil
+                #expect(ChoreReminderLogic.isValid(candidate) == serverAccepts, "\(candidate)")
+            }
+        }
+
+        @Test func offIsTheAbsenceOfAValue() {
+            #expect(ChoreReminderLogic.label(nil) == "Off")
+            #expect(ChoreReminderLogic.label("18:00") == "18:00")
+            #expect(ChoreReminderLogic.label("07:05") == "07:05")
+            // A value the server could never have stored still reads as off,
+            // never as a time the family would trust.
+            #expect(ChoreReminderLogic.label("24:00") == "Off")
+            #expect(ChoreReminderLogic.label("") == "Off")
+        }
+
+        @Test func theDraftSeedsFromTheStoredTimeAndFallsBackWhenOff() {
+            #expect(ChoreReminderLogic.draft(nil) == ChoreReminderLogic.fallback)
+            #expect(ChoreReminderLogic.isValid(ChoreReminderLogic.fallback))
+            #expect(ChoreReminderLogic.draft("07:30") == "07:30")
+            #expect(ChoreReminderLogic.draft("nonsense") == ChoreReminderLogic.fallback)
+        }
+
+        // Turning the reminder OFF is a literal null, not an omitted key: the
+        // route reads an absent key as "keep existing".
+        @Test func clearingEncodesAnExplicitNull() throws {
+            let json = try String(
+                decoding: JSONEncoder().encode(MemberReminderPatch(choreReminderTime: nil)),
+                as: UTF8.self
+            )
+            #expect(json == #"{"choreReminderTime":null}"#)
+            let set = try String(
+                decoding: JSONEncoder().encode(MemberReminderPatch(choreReminderTime: "18:00")),
+                as: UTF8.self
+            )
+            #expect(set == #"{"choreReminderTime":"18:00"}"#)
+        }
+
+        @Test func errorCopyNeverLeaksRawServerCodes() {
+            #expect(
+                ChoreReminderLogic.friendlyError("validation_failed (choreReminderTime)")
+                    == "That time isn't one the server accepts. Pick another."
+            )
+            #expect(ChoreReminderLogic.friendlyError("forbidden").contains("your own"))
+            #expect(!ChoreReminderLogic.friendlyError("some_new_code").contains("some_new_code"))
+        }
+    }
 }
