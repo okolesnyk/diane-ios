@@ -143,6 +143,19 @@ struct CalendarWeekView: View {
         var members: [Components.Schemas.Member]
     }
 
+    /// One enum drives both sheets: tap-a-row detail and toolbar "+" create.
+    private enum ActiveSheet: Identifiable {
+        case detail(Components.Schemas.EventOccurrence)
+        case create(defaultDate: String)
+
+        var id: String {
+            switch self {
+            case .detail(let occurrence): "detail-\(occurrence.id)"
+            case .create(let defaultDate): "create-\(defaultDate)"
+            }
+        }
+    }
+
     // @State so the formatters are built once per zone, not per render;
     // D02: rebuilt in the HOUSEHOLD frame the moment the clock resolves it.
     @State private var logic = CalendarWeekLogic(calendar: .current)
@@ -150,9 +163,15 @@ struct CalendarWeekView: View {
     @State private var selected = Date()
     @State private var data: Loadable<WeekData> = .loading
     @State private var loadedWeek = ""
+    @State private var activeSheet: ActiveSheet?
 
     private var weekDays: [Date] { logic.stripDays(anchor: anchor) }
     private var weekKey: String { logic.dayString(weekDays.first ?? anchor) }
+
+    /// M9c: agenda rows sit flush at 16pt — no card, no page inset.
+    private var rowInsets: EdgeInsets {
+        EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+    }
 
     var body: some View {
         NavigationStack {
@@ -166,6 +185,33 @@ struct CalendarWeekView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Today") { goToToday() }
+                }
+                // Events are ANY-member territory (kiosk trust) — no admin gate.
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        activeSheet = .create(defaultDate: logic.dayString(selected))
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("New event")
+                }
+            }
+            .sheet(item: $activeSheet) { sheet in
+                switch sheet {
+                case .detail(let occurrence):
+                    EventDetailView(
+                        context: context,
+                        occurrence: occurrence,
+                        members: data.value?.members ?? [],
+                        onChanged: { Task { await load() } }
+                    )
+                case .create(let defaultDate):
+                    EventFormView(
+                        context: context,
+                        members: data.value?.members ?? [],
+                        mode: .create(defaultDate: defaultDate),
+                        onSaved: { Task { await load() } }
+                    )
                 }
             }
             // D02: strip days, ring, and query range live in household tz.
@@ -197,8 +243,7 @@ struct CalendarWeekView: View {
             }
             pageButton("chevron.right", weeks: 1)
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 6)
+        .padding(.vertical, 6)  // M9c: edge-to-edge — no horizontal inset
     }
 
     private func pageButton(_ symbol: String, weeks: Int) -> some View {
@@ -296,13 +341,22 @@ struct CalendarWeekView: View {
                         .foregroundStyle(.secondary)
                         .padding(.top, 48)
                         .listRowSeparator(.hidden)
+                        .listRowInsets(rowInsets)
                 } else {
                     ForEach(rows, id: \.id) { occurrence in
-                        EventRow(
-                            occurrence: occurrence,
-                            timeLabel: logic.timeLabel(for: occurrence),
-                            members: week.members
-                        )
+                        Button {
+                            activeSheet = .detail(occurrence)
+                        } label: {
+                            EventRow(
+                                occurrence: occurrence,
+                                timeLabel: logic.timeLabel(for: occurrence),
+                                members: week.members
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
+                        // M9c: plain full-width rows, hairline separators.
+                        .listRowInsets(rowInsets)
                     }
                 }
             }

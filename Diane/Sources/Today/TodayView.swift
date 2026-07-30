@@ -86,6 +86,92 @@ enum TodayLogic {
         return sections
     }
 
+    /// Kiosk trust: the circle completes an open row and un-checks a done
+    /// one — no matter who owns it or checked it.
+    enum CircleAction: Equatable {
+        case complete, uncomplete
+    }
+
+    static func circleAction(for chore: Chore) -> CircleAction {
+        chore.status == .completed ? .uncomplete : .complete
+    }
+
+    /// M9c: beyond the circle a row has exactly one other surface — swipe.
+    /// Mirrors the Chores board rules so both screens behave identically.
+    struct SwipeActions: Equatable {
+        var canClaim = false
+        var canPutBack = false
+        var canDismiss = false
+    }
+
+    /// Claim an unowned open row, put back any claimed one (D27), dismiss any
+    /// open one (D23). A completed row offers nothing — the circle un-checks it.
+    static func swipeActions(for chore: Chore) -> SwipeActions {
+        guard chore.status != .completed else { return SwipeActions() }
+        return SwipeActions(
+            canClaim: chore.assigneeMemberId == nil && chore.claimedByMemberId == nil,
+            canPutBack: chore.claimedByMemberId != nil,
+            canDismiss: true
+        )
+    }
+
+    /// D24: dismiss is permanent, so it names the chore and confirms first.
+    static func dismissPrompt(_ title: String) -> String {
+        "Dismiss \u{201C}\(title)\u{201D}?"
+    }
+
+    /// One family-hub block: another member's whole day.
+    struct MemberDay: Equatable {
+        var member: Components.Schemas.Member
+        var events: [Event] = []  // R6
+        var openChores: [Chore] = []
+        var doneCount: Int = 0
+        var routines: [RoutineEntry] = []
+        /// R6: events are plans too — a day with an appointment isn't free.
+        var isFree: Bool { events.isEmpty && openChores.isEmpty && doneCount == 0 && routines.isEmpty }
+    }
+
+    /// R6: a member's events are the ones whose memberIds CONTAINS their id.
+    /// Whole-family events (memberIds nil) belong to the shared Today section
+    /// only — never duplicated onto every member's block. Sorted like the
+    /// shared list: all-day first, then by start.
+    static func memberEvents(_ events: [Event], member: String) -> [Event] {
+        sortedEvents(events.filter { $0.memberIds?.contains(member) ?? false })
+    }
+
+    /// Hub blocks for every OTHER member, by sortOrder (name tiebreak).
+    /// Open rows go to their OWNER; done rows count per D06 (owner, else
+    /// completer); unowned pool rows stay off the blocks — they live in
+    /// "My day" as up-for-grabs. Routines are the member's WHOLE day in
+    /// board order — the window cut is only for MY actionable list.
+    static func familyDays(
+        members: [Components.Schemas.Member],
+        me: String,
+        occurrences: [Chore],
+        routines: [RoutineEntry],
+        events: [Event]
+    ) -> [MemberDay] {
+        members
+            .filter { $0.id != me }
+            .sorted { ($0.sortOrder, $0.name) < ($1.sortOrder, $1.name) }
+            .map { member in
+                var day = MemberDay(member: member)
+                for occurrence in occurrences {
+                    let owner = owner(of: occurrence)
+                    if occurrence.status == .completed {
+                        if (owner ?? occurrence.completedByMemberId) == member.id {
+                            day.doneCount += 1
+                        }
+                    } else if owner == member.id {
+                        day.openChores.append(occurrence)
+                    }
+                }
+                day.routines = routines.filter { $0.memberId == member.id }
+                day.events = memberEvents(events, member: member.id)  // R6
+                return day
+            }
+    }
+
     /// D06: "by <name>" when someone other than the owner checked it off.
     static func completedByNote(_ chore: Chore, names: [String: String]) -> String? {
         guard chore.status == .completed, let by = chore.completedByMemberId,
@@ -131,16 +217,60 @@ enum TodayLogic {
         return (c.hour ?? 0) * 60 + (c.minute ?? 0)
     }
 
-    /// My board entries whose window contains the clock, board order kept.
-    static func activeRoutines(_ entries: [RoutineEntry], me: String, clock: Int) -> [RoutineEntry] {
-        entries.filter {
-            $0.memberId == me && windowContains(clock: clock, start: $0.windowStart, end: $0.windowEnd)
+    /// R8: one of MY routines, flagged when the clock is inside its window.
+    struct DayRoutine: Equatable {
+        var entry: RoutineEntry
+        var isNow: Bool
+    }
+
+    /// R8: my WHOLE day — same as every other member's block, no window cut.
+    /// In-window entries come first and carry the "Now" pill; board order is
+    /// kept inside each group.
+    static func myRoutines(_ entries: [RoutineEntry], me: String, clock: Int) -> [DayRoutine] {
+        let mine = entries.filter { $0.memberId == me }.map {
+            DayRoutine(
+                entry: $0,
+                isNow: windowContains(clock: clock, start: $0.windowStart, end: $0.windowEnd)
+            )
         }
+        return mine.filter(\.isNow) + mine.filter { !$0.isNow }
     }
 
     /// Resolved (completed or skipped) over total — matches the web kiosk.
     static func progress(of entry: RoutineEntry) -> (done: Int, total: Int) {
         (entry.tasks.filter { $0.status != .open }.count, entry.tasks.count)
+    }
+
+    /// "2 of 3" progress line; every task resolved reads "All done ✓".
+    static func routineProgressLabel(of entry: RoutineEntry) -> String {
+        let progress = progress(of: entry)
+        return progress.done == progress.total ? "All done ✓" : "\(progress.done) of \(progress.total)"
+    }
+
+    // R13: rows are real Buttons — one curated VoiceOver label each, so the
+    // trait and the announcement arrive together.
+    static func eventRowLabel(_ event: Event, timeZone: TimeZone) -> String {
+        let when = event.allDay ? "all day" : timeLabel(event.startsAt, timeZone: timeZone).map { "at \($0)" }
+        return when.map { "\(event.summary), \($0)" } ?? event.summary
+    }
+
+    static func choreRowLabel(_ chore: Chore, names: [String: String] = [:]) -> String {
+        var parts = [chore.title, "\(chore.starValue) stars"]
+        if chore.status == .completed {
+            parts.append("done")
+        } else if chore.late {
+            parts.append("late")
+        }
+        if let note = completedByNote(chore, names: names) { parts.append(note) }
+        return parts.joined(separator: ", ")
+    }
+
+    static func routineRowLabel(_ entry: RoutineEntry, isNow: Bool) -> String {
+        let progress = progress(of: entry)
+        var parts = [entry.title]
+        if isNow { parts.append("now") }
+        parts.append("\(progress.done) of \(progress.total) done")
+        return parts.joined(separator: ", ")
     }
 
     static func balance(of memberID: String, in balances: [Components.Schemas.StarBalance]) -> Int {
@@ -190,9 +320,30 @@ struct TodayView: View {
         var events: [Components.Schemas.EventOccurrence]
         var occurrences: [Components.Schemas.ChoreOccurrence]
         var routines: [Components.Schemas.RoutineBoardEntry]
-        var balance: Int
-        var memberColors: [String: String]
-        var memberNames: [String: String]
+        var boardDate: String
+        var members: [Components.Schemas.Member]
+        var balances: [Components.Schemas.StarBalance]
+    }
+
+    /// One state drives every sheet: detail taps and settings.
+    /// R3: the routine payload FREEZES the board date it was opened with —
+    /// a live `boardDate` would go un-stale at household midnight and re-arm
+    /// actions against yesterday's snapshot (RoutinesView freezes it too).
+    enum ActiveSheet: Identifiable {
+        case event(Components.Schemas.EventOccurrence)
+        case chore(Components.Schemas.ChoreOccurrence)
+        case routine(entry: Components.Schemas.RoutineBoardEntry, boardDate: String)
+        case settings
+
+        /// Stable per row so a data refresh never re-presents the sheet.
+        var id: String {
+            switch self {
+            case .event(let occurrence): "event-\(occurrence.id)"
+            case .chore(let occurrence): "chore-\(occurrence.id)"
+            case .routine(let entry, _): "routine-\(entry.routineId)-\(entry.memberId)"
+            case .settings: "settings"
+            }
+        }
     }
 
     let context: SignedInContext
@@ -202,7 +353,8 @@ struct TodayView: View {
     @State private var data: Loadable<TodayData> = .loading
     @State private var completingIDs: Set<String> = []
     @State private var actionError: String?
-    @State private var showSettings = false
+    @State private var activeSheet: ActiveSheet?
+    @State private var pendingDismiss: Components.Schemas.ChoreOccurrence?  // D24
 
     var body: some View {
         NavigationStack {
@@ -226,15 +378,15 @@ struct TodayView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        showSettings = true
+                        activeSheet = .settings
                     } label: {
                         Image(systemName: "gearshape")
                     }
                     .accessibilityLabel("Settings")
                 }
             }
-            .sheet(isPresented: $showSettings) {
-                SettingsView(context: context)
+            .sheet(item: $activeSheet) { sheet in
+                sheetContent(sheet)
             }
         }
         // D05: clock.today in the key refetches at household midnight.
@@ -249,22 +401,84 @@ struct TodayView: View {
         } message: {
             Text(actionError ?? "")
         }
+        // D24: dismiss never resurfaces, so it always confirms first.
+        .confirmationDialog(
+            TodayLogic.dismissPrompt(pendingDismiss?.title ?? ""),
+            isPresented: Binding(
+                get: { pendingDismiss != nil },
+                set: { if !$0 { pendingDismiss = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDismiss
+        ) { chore in
+            Button("Dismiss", role: .destructive) {
+                Task { await perform(.dismiss, on: chore) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("It goes away for good — no stars, and it won't come back.")
+        }
+    }
+
+    /// Detail sheets refetch on any mutation (SSE bumps too).
+    @ViewBuilder
+    private func sheetContent(_ sheet: ActiveSheet) -> some View {
+        switch sheet {
+        case .event(let occurrence):
+            EventDetailView(
+                context: context,
+                occurrence: occurrence,
+                members: data.value?.members ?? []
+            ) {
+                Task { await load() }
+            }
+        case .chore(let occurrence):
+            ChoreDetailView(
+                context: context,
+                occurrence: occurrence,
+                members: data.value?.members ?? []
+            ) {
+                Task { await load() }
+            }
+        case .routine(let entry, let boardDate):  // R3: frozen at tap time
+            RoutineDetailView(
+                context: context,
+                entry: entry,
+                boardDate: boardDate,
+                members: data.value?.members ?? []
+            ) {
+                Task { await load() }
+            }
+        case .settings:
+            SettingsView(context: context)
+        }
     }
 
     // MARK: Content
 
     private func content(_ today: TodayData) -> some View {
+        let me = context.session.memberID
+        let names = Dictionary(uniqueKeysWithValues: today.members.map { ($0.id, $0.name) })
+        let colors = Dictionary(uniqueKeysWithValues: today.members.map { ($0.id, $0.color) })
         let events = TodayLogic.sortedEvents(today.events)
-        let chores = TodayLogic.choreSections(today.occurrences, me: context.session.memberID)
+        let chores = TodayLogic.choreSections(today.occurrences, me: me)
         // D03/D05: household wall clock; reading clock.minute re-renders each
         // tick, so a window opening appears within a minute on an idle screen.
-        let routines = TodayLogic.activeRoutines(
+        // R8: my whole day, in-window entries first with a "Now" pill.
+        let routines = TodayLogic.myRoutines(
             today.routines,
-            me: context.session.memberID,
+            me: me,
             clock: TodayLogic.minutes(clock.minute) ?? 0
         )
+        let family = TodayLogic.familyDays(
+            members: today.members,
+            me: me,
+            occurrences: today.occurrences,
+            routines: today.routines,
+            events: today.events  // R6
+        )
         return List {
-            headerSection(balance: today.balance)
+            headerSection(balance: TodayLogic.balance(of: me, in: today.balances))
             if events.isEmpty && chores.isEmpty && routines.isEmpty {
                 Section {
                     ContentUnavailableView(
@@ -272,31 +486,51 @@ struct TodayView: View {
                         systemImage: "sun.max",
                         description: Text("Enjoy your free time!")
                     )
+                    .listRowInsets(rowInsets)
+                    .listRowSeparator(.hidden)
                 }
-                .listRowBackground(Color.clear)
             }
             if !events.isEmpty {
-                Section("Today") {
+                Section {
                     ForEach(events, id: \.id) { event in
-                        eventRow(event, colors: today.memberColors)
+                        eventRow(event, colors: colors)
                     }
+                } header: {
+                    sectionHeader("Today")
                 }
             }
-            if !chores.isEmpty {
-                Section("My chores") {
-                    ForEach(chores.mine, id: \.id) { choreRow($0, pool: false, names: today.memberNames) }
-                    ForEach(chores.pool, id: \.id) { choreRow($0, pool: true, names: today.memberNames) }
-                    ForEach(chores.completed, id: \.id) { choreRow($0, pool: false, names: today.memberNames) }
+            if !chores.isEmpty || !routines.isEmpty {
+                Section {
+                    ForEach(chores.mine, id: \.id) { choreRow($0, pool: false, names: names) }
+                    ForEach(chores.pool, id: \.id) { choreRow($0, pool: true, names: names) }
+                    ForEach(chores.completed, id: \.id) { choreRow($0, pool: false, names: names) }
+                    ForEach(routines, id: \.entry.routineId) { routineRow($0, boardDate: today.boardDate) }
+                } header: {
+                    sectionHeader("My day")
                 }
             }
-            if !routines.isEmpty {
-                Section("My routines") {
-                    ForEach(routines, id: \.routineId) { routineRow($0) }
-                }
+            // The family hub: everyone else's whole day, at a glance.
+            ForEach(Array(family.enumerated()), id: \.element.member.id) { index, day in
+                familySection(day, first: index == 0, balances: today.balances, boardDate: today.boardDate)
             }
         }
+        .listStyle(.plain)  // M9c: edge-to-edge, square, hairline-grouped
         .fontDesign(.rounded)
         .refreshable { await load() }
+    }
+
+    /// M9c: every row sits flush at 16pt, no card, no page inset.
+    private var rowInsets: EdgeInsets {
+        EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+    }
+
+    /// M9c: small uppercase secondary label, flush with the rows.
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
+            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))
     }
 
     private func headerSection(balance: Int) -> some View {
@@ -311,111 +545,340 @@ struct TodayView: View {
                 Text("Hi, \(context.session.memberName)!")
                     .font(.title2.weight(.semibold))
                 Spacer()
-                Text("★ \(balance)")
-                    .font(.headline)
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(.orange.opacity(0.15)))
-                    .accessibilityLabel("\(balance) stars")
+                starChip(balance, font: .headline)
             }
+            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+            .listRowSeparator(.hidden)
         }
-        .listRowBackground(Color.clear)
-        .listRowInsets(EdgeInsets(top: 4, leading: 4, bottom: 4, trailing: 4))
     }
 
+    private func starChip(_ balance: Int, font: Font) -> some View {
+        Text("★ \(balance)")
+            .font(font.weight(.semibold))
+            .foregroundStyle(.orange)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(.orange.opacity(0.15)))
+            .accessibilityLabel("\(balance) stars")
+    }
+
+    // R13: a real Button, so VoiceOver announces the row as actionable.
     private func eventRow(_ event: Components.Schemas.EventOccurrence, colors: [String: String]) -> some View {
-        HStack(spacing: 12) {
-            // D02: event instants render in the household frame, like the kiosk.
-            Text(event.allDay ? "All day" : (TodayLogic.timeLabel(event.startsAt, timeZone: clock.timeZone) ?? "—"))
-                .font(.subheadline.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 58, alignment: .leading)
-            Text(event.summary)
-                .lineLimit(2)
-            Spacer()
-            if let memberIds = event.memberIds {
-                HStack(spacing: -3) {
-                    ForEach(memberIds, id: \.self) { id in
-                        Circle()
-                            .fill(Color(hex: colors[id] ?? "#8E8E93"))
-                            .frame(width: 10, height: 10)
-                    }
-                }
-            } else {
-                // Whole-family event.
-                Image(systemName: "house.fill")
-                    .font(.caption)
+        Button {
+            activeSheet = .event(event)
+        } label: {
+            HStack(spacing: 12) {
+                // D02: event instants render in the household frame, like the kiosk.
+                Text(event.allDay ? "All day" : (TodayLogic.timeLabel(event.startsAt, timeZone: clock.timeZone) ?? "—"))
+                    .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .frame(width: 58, alignment: .leading)
+                Text(event.summary)
+                    .lineLimit(2)
+                Spacer()
+                if let memberIds = event.memberIds {
+                    HStack(spacing: -3) {
+                        ForEach(memberIds, id: \.self) { id in
+                            Circle()
+                                .fill(Color(hex: colors[id] ?? "#8E8E93"))
+                                .frame(width: 10, height: 10)
+                        }
+                    }
+                } else {
+                    // Whole-family event.
+                    Image(systemName: "house.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel(TodayLogic.eventRowLabel(event, timeZone: clock.timeZone))
+        .listRowInsets(rowInsets)
     }
 
+    /// M9c: the two action surfaces, identical to the Chores tab — the circle
+    /// on the row, and swipe. Trailing dismisses (orange, never full-swipe,
+    /// always confirmed); leading claims or puts back.
+    private func choreSwipes<Content: View>(
+        _ chore: Components.Schemas.ChoreOccurrence,
+        @ViewBuilder row: () -> Content
+    ) -> some View {
+        let actions = TodayLogic.swipeActions(for: chore)
+        return row()
+            .listRowInsets(rowInsets)
+            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                if actions.canClaim {
+                    Button { Task { await perform(.claim, on: chore) } } label: {
+                        Label("Claim", systemImage: "hand.raised")
+                    }
+                    .tint(.blue)
+                    .accessibilityLabel("Claim \(chore.title)")
+                }
+                if actions.canPutBack {
+                    // D27: the visible undo of Claim.
+                    Button { Task { await perform(.unclaim, on: chore) } } label: {
+                        Label("Put back", systemImage: "arrow.uturn.backward")
+                    }
+                    .tint(.blue)
+                    .accessibilityLabel("Put back \(chore.title)")
+                }
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if actions.canDismiss {
+                    Button { pendingDismiss = chore } label: {  // D24: confirms first
+                        Label("Dismiss", systemImage: "xmark.circle")
+                    }
+                    .tint(.orange)
+                    .accessibilityLabel("Dismiss \(chore.title)")
+                }
+            }
+    }
+
+    // R13: the detail tap is a Button beside the circle — never wrapping it,
+    // so the circle keeps its own tap.
     private func choreRow(_ chore: Components.Schemas.ChoreOccurrence, pool: Bool, names: [String: String]) -> some View {
         let completed = chore.status == .completed
-        return HStack(spacing: 12) {
-            emojiBadge(chore.emoji)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(chore.title)
-                    .strikethrough(completed)
-                    .foregroundStyle(completed ? .secondary : .primary)
-                HStack(spacing: 6) {
-                    Text("★ \(chore.starValue)")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.orange)
-                    if pool {
-                        tag("Up for grabs", color: .blue)
+        return choreSwipes(chore) {
+            HStack(spacing: 12) {
+                Button {
+                    activeSheet = .chore(chore)
+                } label: {
+                    HStack(spacing: 12) {
+                        emojiBadge(chore.emoji)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(chore.title)
+                                .strikethrough(completed)
+                                .foregroundStyle(completed ? .secondary : .primary)
+                            HStack(spacing: 6) {
+                                Text("★ \(chore.starValue)")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.orange)
+                                if pool {
+                                    tag("Up for grabs", color: .blue)
+                                }
+                                if chore.late && !completed {
+                                    tag("late", color: .red)
+                                }
+                                // D07: deadline chores must not read as due today.
+                                if let deadline = TodayLogic.deadlineLabel(dueDate: chore.dueDate, dueMode: chore.dueMode),
+                                   !completed {
+                                    tag(deadline, color: .purple)
+                                }
+                                // D06: someone else checked off my chore.
+                                if let note = TodayLogic.completedByNote(chore, names: names) {
+                                    Text(note)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        Spacer()
                     }
-                    if chore.late && !completed {
-                        tag("late", color: .red)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(TodayLogic.choreRowLabel(chore, names: names))
+                completeCircle(chore)
+            }
+        }
+    }
+
+    /// R8: my own routine row — the "Now" pill marks an open window; the rest
+    /// of my day stays visible instead of being filtered out.
+    private func routineRow(_ day: TodayLogic.DayRoutine, boardDate: String) -> some View {
+        let entry = day.entry
+        return Button {
+            activeSheet = .routine(entry: entry, boardDate: boardDate)  // R3
+        } label: {
+            HStack(spacing: 12) {
+                emojiBadge(entry.emoji)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(entry.title)
+                        if day.isNow {
+                            tag("Now", color: .green)
+                        }
                     }
-                    // D07: deadline chores must not read as due today.
-                    if let deadline = TodayLogic.deadlineLabel(dueDate: chore.dueDate, dueMode: chore.dueMode),
-                       !completed {
-                        tag(deadline, color: .purple)
-                    }
-                    // D06: someone else checked off my chore.
-                    if let note = TodayLogic.completedByNote(chore, names: names) {
-                        Text(note)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(TodayLogic.routineProgressLabel(of: entry))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(day.isNow ? .primary : .secondary)
+                Spacer()
+                if entry.streak >= 2 {
+                    Text("🔥 \(entry.streak)")
+                        .font(.subheadline)
                 }
             }
-            Spacer()
-            Button {
-                Task { await complete(chore) }
-            } label: {
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(TodayLogic.routineRowLabel(entry, isNow: day.isNow))
+        // M9c: display-only here — the tap opens the detail sheet, where the
+        // task circles and their swipes live.
+        .listRowInsets(rowInsets)
+    }
+
+    // MARK: Family hub
+
+    private func familySection(
+        _ day: TodayLogic.MemberDay,
+        first: Bool,
+        balances: [Components.Schemas.StarBalance],
+        boardDate: String
+    ) -> some View {
+        Section {
+            // R6: their appointments — the owner's "what are my wife's plans".
+            ForEach(day.events, id: \.id) { familyEventRow($0) }
+            ForEach(day.openChores, id: \.id) { familyChoreRow($0) }
+            if day.doneCount > 0 {
+                Text("\(day.doneCount) done ✓")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .listRowInsets(rowInsets)
+            }
+            ForEach(day.routines, id: \.routineId) { familyRoutineRow($0, boardDate: boardDate) }
+            if day.isFree {
+                Text("Free day ✨")
+                    .foregroundStyle(.secondary)
+                    .listRowInsets(rowInsets)
+            }
+        } header: {
+            // M9c: no card — the header IS the member's identity, rows sit flush.
+            VStack(alignment: .leading, spacing: 8) {
+                if first {
+                    Text("The family")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                }
+                HStack(spacing: 10) {
+                    MemberAvatarView(
+                        name: day.member.name,
+                        colorHex: day.member.color,
+                        avatar: day.member.avatar,
+                        size: 30
+                    )
+                    Text(day.member.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    starChip(TodayLogic.balance(of: day.member.id, in: balances), font: .caption)
+                }
+                .textCase(nil)
+            }
+            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 6, trailing: 16))
+        }
+    }
+
+    /// R6: one of their events. Whole-family events aren't here — they stay in
+    /// the shared "Today" section, unduplicated.
+    private func familyEventRow(_ event: Components.Schemas.EventOccurrence) -> some View {
+        Button {
+            activeSheet = .event(event)
+        } label: {
+            HStack(spacing: 12) {
+                // D02: household frame, like the shared list.
+                Text(event.allDay ? "All day" : (TodayLogic.timeLabel(event.startsAt, timeZone: clock.timeZone) ?? "—"))
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 58, alignment: .leading)
+                Text(event.summary)
+                    .lineLimit(2)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(TodayLogic.eventRowLabel(event, timeZone: clock.timeZone))  // R13
+        .listRowInsets(rowInsets)
+    }
+
+    /// Compact open row on another member's block; the circle still checks
+    /// it off (kiosk trust — helping is the point) and swipe still acts.
+    private func familyChoreRow(_ chore: Components.Schemas.ChoreOccurrence) -> some View {
+        choreSwipes(chore) {
+            HStack(spacing: 12) {
+                // R13: Button beside the circle, so both stay tappable.
+                Button {
+                    activeSheet = .chore(chore)
+                } label: {
+                    HStack(spacing: 12) {
+                        emojiBadge(chore.emoji)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(chore.title)
+                            HStack(spacing: 6) {
+                                if let time = chore.dueTime {
+                                    tag(time, color: .secondary)
+                                }
+                                if chore.late {
+                                    tag("late", color: .red)
+                                }
+                                // D07: deadline chores must not read as due today.
+                                if let deadline = TodayLogic.deadlineLabel(dueDate: chore.dueDate, dueMode: chore.dueMode) {
+                                    tag(deadline, color: .purple)
+                                }
+                            }
+                        }
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(TodayLogic.choreRowLabel(chore))
+                completeCircle(chore)
+            }
+        }
+    }
+
+    /// "🌅 Morning · 2 of 3" — the whole day's routines, not just open windows.
+    private func familyRoutineRow(_ entry: Components.Schemas.RoutineBoardEntry, boardDate: String) -> some View {
+        Button {
+            activeSheet = .routine(entry: entry, boardDate: boardDate)  // R3
+        } label: {
+            HStack(spacing: 12) {
+                emojiBadge(entry.emoji)
+                Text(entry.title)
+                Text("· \(TodayLogic.routineProgressLabel(of: entry))")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if entry.streak >= 2 {
+                    Text("🔥 \(entry.streak)")
+                        .font(.subheadline)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(TodayLogic.routineRowLabel(entry, isNow: false))  // R13
+        .listRowInsets(rowInsets)
+    }
+
+    /// The 44pt circle: completes an open row, un-checks a done one.
+    private func completeCircle(_ chore: Components.Schemas.ChoreOccurrence) -> some View {
+        let completed = chore.status == .completed
+        return Button {
+            Task { await toggle(chore) }
+        } label: {
+            Group {
                 if completingIDs.contains(chore.id) {
                     ProgressView()
                 } else {
                     Image(systemName: completed ? "checkmark.circle.fill" : "circle")
                         .font(.title2)
-                        .foregroundStyle(completed ? .green : .secondary)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(completed ? Color.green : Color.secondary)
                 }
             }
-            .buttonStyle(.plain)
-            .disabled(completed || completingIDs.contains(chore.id))
-            .accessibilityLabel(completed ? "Done" : "Complete \(chore.title)")
+            .frame(width: 44, height: 44)  // HIG minimum tap target
+            .contentShape(Rectangle())
         }
-    }
-
-    private func routineRow(_ entry: Components.Schemas.RoutineBoardEntry) -> some View {
-        let progress = TodayLogic.progress(of: entry)
-        return HStack(spacing: 12) {
-            emojiBadge(entry.emoji)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(entry.title)
-                Text("\(progress.done) of \(progress.total)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if entry.streak >= 2 {
-                Text("🔥 \(entry.streak)")
-                    .font(.subheadline)
-            }
-        }
+        .buttonStyle(.borderless)
+        .disabled(completingIDs.contains(chore.id))
+        .accessibilityLabel(completed ? "Uncomplete \(chore.title)" : "Complete \(chore.title)")
     }
 
     @ViewBuilder
@@ -449,7 +912,6 @@ struct TodayView: View {
         // household tz, and chores/routines always answer for household-today.
         let today = clock.today
         let tomorrow = clock.tomorrow
-        let me = context.session.memberID
         do {
             async let eventsCall = context.client.api.listEvents(.init(query: .init(from: today, to: tomorrow)))
             async let membersCall = context.client.api.listMembers(.init())
@@ -463,14 +925,9 @@ struct TodayView: View {
             case .unauthorized: appState.handleUnauthorized(); return
             default: fail(); return
             }
-            var colors: [String: String] = [:]
-            var names: [String: String] = [:]
+            var members: [Components.Schemas.Member] = []
             switch try await membersCall {
-            case .ok(let ok):
-                for member in try ok.body.json.members {
-                    colors[member.id] = member.color
-                    names[member.id] = member.name
-                }
+            case .ok(let ok): members = try ok.body.json.members
             case .unauthorized: appState.handleUnauthorized(); return
             default: fail(); return
             }
@@ -481,14 +938,19 @@ struct TodayView: View {
             default: fail(); return
             }
             var routines: [Components.Schemas.RoutineBoardEntry] = []
+            var boardDate = today
             switch try await routinesCall {
-            case .ok(let ok): routines = try ok.body.json.entries
+            case .ok(let ok):
+                let board = try ok.body.json
+                routines = board.entries
+                boardDate = board.date
             case .unauthorized: appState.handleUnauthorized(); return
             default: fail(); return
             }
-            var balance = 0
+            // The whole family's balances — the hub shows everyone's chip.
+            var balances: [Components.Schemas.StarBalance] = []
             switch try await balancesCall {
-            case .ok(let ok): balance = TodayLogic.balance(of: me, in: try ok.body.json.balances)
+            case .ok(let ok): balances = try ok.body.json.balances
             case .unauthorized: appState.handleUnauthorized(); return
             default: fail(); return
             }
@@ -496,9 +958,9 @@ struct TodayView: View {
                 events: events,
                 occurrences: occurrences,
                 routines: routines,
-                balance: balance,
-                memberColors: colors,
-                memberNames: names
+                boardDate: boardDate,
+                members: members,
+                balances: balances
             ))
         } catch {
             // D08: a cancelled task is lifecycle, not an outage.
@@ -517,29 +979,90 @@ struct TodayView: View {
         "Your home server didn't answer. Pull down to try again."
     }
 
-    /// Complete taps are optimistic: reflect the returned occurrence right
+    /// The circle is a toggle (kiosk trust); both sides share the swipe
+    /// actions' optimistic apply + 409 plumbing.
+    private func toggle(_ chore: Components.Schemas.ChoreOccurrence) async {
+        switch TodayLogic.circleAction(for: chore) {
+        case .complete: await perform(.complete, on: chore)
+        case .uncomplete: await perform(.uncomplete, on: chore)
+        }
+    }
+
+    private enum RowCall {
+        case complete, uncomplete, claim, unclaim, dismiss
+    }
+
+    private enum CallOutcome {
+        case ok(Components.Schemas.ChoreActionResult)
+        case unauthorized
+        case conflict(String?)
+        case failed
+    }
+
+    /// Every row action is optimistic: reflect the returned occurrence right
     /// away, the SSE bump refetches the rest (balance, other rows).
-    private func complete(_ chore: Components.Schemas.ChoreOccurrence) async {
-        completingIDs.insert(chore.id)
+    private func perform(_ call: RowCall, on chore: Components.Schemas.ChoreOccurrence) async {
+        guard completingIDs.insert(chore.id).inserted else { return }
         defer { completingIDs.remove(chore.id) }
         do {
-            let output = try await context.client.api.completeChoreOccurrence(.init(path: .init(id: chore.id)))
-            switch output {
-            case .ok(let ok):
-                apply(try ok.body.json, tappedID: chore.id)
+            switch try await send(call, id: chore.id) {
+            case .ok(let result):
+                apply(result, tappedID: chore.id)
             case .unauthorized:
                 appState.handleUnauthorized()
-            case .conflict(let conflict):
-                // D21: the semantic code is the Error body's `error` field.
-                actionError = TodayLogic.conflictMessage(code: (try? conflict.body.json)?.error)
+            case .conflict(let code):
+                actionError = TodayLogic.conflictMessage(code: code)
                 await load()
-            default:
+            case .failed:
                 actionError = TodayLogic.conflictMessage(code: nil)
                 await load()
             }
         } catch {
             guard !isTaskCancellation(error) else { return } // D08
             actionError = "Couldn't reach your home server. Try again."
+        }
+    }
+
+    /// One outcome from five per-operation Output enums. D21: the semantic
+    /// code is the Error body's `error` field; unclaim declares no 409.
+    private func send(_ call: RowCall, id: String) async throws -> CallOutcome {
+        let api = context.client.api
+        switch call {
+        case .complete:
+            switch try await api.completeChoreOccurrence(.init(path: .init(id: id))) {
+            case .ok(let ok): return .ok(try ok.body.json)
+            case .unauthorized: return .unauthorized
+            case .conflict(let conflict): return .conflict((try? conflict.body.json)?.error)
+            default: return .failed
+            }
+        case .uncomplete:
+            // The server revokes the award (409 insufficient_stars when spent).
+            switch try await api.uncompleteChoreOccurrence(.init(path: .init(id: id))) {
+            case .ok(let ok): return .ok(try ok.body.json)
+            case .unauthorized: return .unauthorized
+            case .conflict(let conflict): return .conflict((try? conflict.body.json)?.error)
+            default: return .failed
+            }
+        case .claim:
+            switch try await api.claimChoreOccurrence(.init(path: .init(id: id))) {
+            case .ok(let ok): return .ok(try ok.body.json)
+            case .unauthorized: return .unauthorized
+            case .conflict(let conflict): return .conflict((try? conflict.body.json)?.error)
+            default: return .failed
+            }
+        case .unclaim:
+            switch try await api.unclaimChoreOccurrence(.init(path: .init(id: id))) {
+            case .ok(let ok): return .ok(try ok.body.json)
+            case .unauthorized: return .unauthorized
+            default: return .failed
+            }
+        case .dismiss:
+            switch try await api.dismissChoreOccurrence(.init(path: .init(id: id))) {
+            case .ok(let ok): return .ok(try ok.body.json)
+            case .unauthorized: return .unauthorized
+            case .conflict(let conflict): return .conflict((try? conflict.body.json)?.error)
+            default: return .failed
+            }
         }
     }
 

@@ -39,15 +39,13 @@ targets:
         INFOPLIST_FILE: Diane/Info.plist
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 0.1.0
-    # Push entitlement — needs the PAID Apple Developer team (pending as of
-    # 2026-07-27; personal teams can't sign aps-environment). When the
-    # membership is approved: uncomment these five lines, run
-    # scripts/generate.sh, and switch the Team in Signing & Capabilities.
-    # entitlements:
-    #   path: Diane/Diane.entitlements
-    #   properties:
-    #     # Sandbox APNs; archive/export rewrites this to production.
-    #     aps-environment: development
+    entitlements:
+      path: Diane/Diane.entitlements
+      properties:
+        # Sandbox APNs — what Xcode-installed builds use. TestFlight/App Store
+        # builds are production; the server's APNS_PRODUCTION must match.
+        # Needs the paid Apple Developer team selected in Signing.
+        aps-environment: development
 
   DianeTests:
     type: bundle.unit-test

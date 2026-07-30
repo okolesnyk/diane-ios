@@ -771,6 +771,12 @@ components:
               pattern: ^\d{4}-\d{2}-\d{2}$
           required:
             - freq
+        seriesStartsAt:
+          type: string
+          nullable: true
+        seriesStartDate:
+          type: string
+          nullable: true
       required:
         - id
         - eventId
@@ -785,6 +791,8 @@ components:
         - memberIds
         - color
         - recurrence
+        - seriesStartsAt
+        - seriesStartDate
     EventCreated:
       type: object
       properties:

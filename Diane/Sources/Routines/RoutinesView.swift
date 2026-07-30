@@ -41,12 +41,36 @@ enum RoutinesBoardLogic {
     /// D27: kid-facing controls match the web's 44px circles (HIG minimum).
     static let tapTarget: CGFloat = 44
 
+    /// M9c density contract: rows sit flush to the screen edge.
+    static var rowInsets: EdgeInsets { EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16) }
+
     /// D27: visible recovery label per task status (long-press was the only
     /// undo surface before).
     static func recoveryActionTitle(
         for status: Components.Schemas.RoutineBoardEntry.TasksPayloadPayload.StatusPayload
     ) -> String {
         status == .open ? "Skip" : "Un-do"
+    }
+
+    /// Which swipe edge carries a task's recovery action.
+    enum RecoveryEdge {
+        case leading
+        case trailing
+    }
+
+    /// M9c: Skip swipes in from the trailing edge while a task is open; Un-do
+    /// comes back from the leading edge once it's resolved. One per row.
+    static func recoveryEdge(
+        for status: Components.Schemas.RoutineBoardEntry.TasksPayloadPayload.StatusPayload
+    ) -> RecoveryEdge {
+        status == .open ? .trailing : .leading
+    }
+
+    /// Routine section caption: the window, plus the phase when no "Now" pill
+    /// is there to say it.
+    static func headerCaption(windowStart: String, windowEnd: String, phase: Phase) -> String {
+        let window = "\(windowStart)–\(windowEnd)"
+        return phase == .now ? window : "\(window) · \(phase.title)"
     }
 
     static func mine(
@@ -88,6 +112,23 @@ enum RoutinesBoardLogic {
     }
 }
 
+/// Admin "All routines" list math (web's All-routines parity).
+enum RoutinesManageLogic {
+    /// Admin touch-reorder (sortOrder) is canonical; deterministic tie-breaks.
+    static func sorted(_ routines: [Components.Schemas.Routine]) -> [Components.Schemas.Routine] {
+        routines.sorted {
+            ($0.sortOrder, $0.windowStart, $0.title, $0.id)
+                < ($1.sortOrder, $1.windowStart, $1.title, $1.id)
+        }
+    }
+
+    /// "06:00–12:00 · 2 members" row subtitle.
+    static func subtitle(windowStart: String, windowEnd: String, assigneeCount: Int) -> String {
+        let who = assigneeCount == 1 ? "1 member" : "\(assigneeCount) members"
+        return "\(windowStart)–\(windowEnd) · \(who)"
+    }
+}
+
 // The action result's entry is a structurally identical but distinct
 // generated type — bridge it back onto the board.
 extension Components.Schemas.RoutineBoardEntry {
@@ -126,8 +167,25 @@ struct RoutinesView: View {
     @Environment(HouseholdClock.self) private var clock  // D03
 
     @State private var board: Loadable<Components.Schemas.RoutineBoard> = .loading
+    @State private var members: [Components.Schemas.Member] = []
     @State private var busyTaskIds: Set<String> = []
     @State private var actionError: String?
+    @State private var activeSheet: ActiveSheet?
+
+    /// One sheet driver: detail, create, and the admin Manage list.
+    enum ActiveSheet: Identifiable {
+        case detail(entry: Components.Schemas.RoutineBoardEntry, boardDate: String)
+        case create
+        case manage
+
+        var id: String {
+            switch self {
+            case .detail(let entry, _): "detail-\(entry.routineId)-\(entry.memberId)"
+            case .create: "create"
+            case .manage: "manage"
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -136,6 +194,37 @@ struct RoutinesView: View {
                 // D04: clock.today in the key refetches at household midnight.
                 .task(id: "\(signals.version(of: [.routines, .stars]))|\(clock.today)") { await load() }
                 .refreshable { await load() }
+                .toolbar {
+                    // Server enforces admin on routines CRUD; gate the UI too.
+                    if context.session.isAdmin {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Manage") { activeSheet = .manage }
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("New routine", systemImage: "plus") { activeSheet = .create }
+                        }
+                    }
+                }
+                .sheet(item: $activeSheet) { sheet in
+                    switch sheet {
+                    case .detail(let entry, let boardDate):
+                        RoutineDetailView(
+                            context: context,
+                            entry: entry,
+                            boardDate: boardDate,
+                            members: members,
+                            onChanged: { Task { await load() } }
+                        )
+                    case .create:
+                        RoutineFormView(context: context, members: members, mode: .create) {
+                            Task { await load() }
+                        }
+                    case .manage:
+                        ManageRoutinesView(context: context, members: members) {
+                            Task { await load() }
+                        }
+                    }
+                }
                 .alert(
                     "Routines",
                     isPresented: Binding(
@@ -176,54 +265,79 @@ struct RoutinesView: View {
             } else {
                 // D03: phase math on the household wall clock, not the
                 // device's; reading clock.minute re-renders every tick.
-                boardList(entries: mine, now: clock.minute)
+                boardList(entries: mine, now: clock.minute, date: loadedBoard.date)
             }
         }
     }
 
-    private func boardList(entries: [Components.Schemas.RoutineBoardEntry], now: String) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
-                ForEach(RoutinesBoardLogic.sections(for: entries, now: now), id: \.phase) { section in
-                    Text(section.phase.title)
-                        .font(.title3.weight(.semibold))
-                        .fontDesign(.rounded)
-                        .foregroundStyle(section.phase == .now ? Color.cyan : Color.secondary)
-                        .padding(.top, 8)
-                    ForEach(section.entries, id: \.routineId) { entry in
-                        RoutineCardView(
-                            entry: entry,
-                            highlighted: section.phase == .now,
-                            busyTaskIds: busyTaskIds
-                        ) { action, task in
-                            Task { await perform(action, on: task) }
+    /// M9c: one plain, edge-to-edge List — each routine is a Section whose
+    /// header carries the identity, phase ordering (Now → Later → Earlier)
+    /// still drives the order.
+    private func boardList(
+        entries: [Components.Schemas.RoutineBoardEntry],
+        now: String,
+        date: String
+    ) -> some View {
+        List {
+            ForEach(RoutinesBoardLogic.sections(for: entries, now: now), id: \.phase) { section in
+                ForEach(section.entries, id: \.routineId) { entry in
+                    Section {
+                        if entry.tasks.isEmpty {
+                            Text("No tasks in this routine yet.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .listRowInsets(RoutinesBoardLogic.rowInsets)
+                        } else {
+                            ForEach(entry.tasks, id: \.taskId) { task in
+                                RoutineTaskRow(
+                                    task: task,
+                                    busy: busyTaskIds.contains(task.taskId),
+                                    onAction: { action in Task { await perform(action, on: task) } }
+                                )
+                                .listRowInsets(RoutinesBoardLogic.rowInsets)
+                            }
                         }
+                    } header: {
+                        RoutineSectionHeader(
+                            entry: entry,
+                            phase: section.phase,
+                            onTap: { activeSheet = .detail(entry: entry, boardDate: date) }
+                        )
+                        .listRowInsets(RoutinesBoardLogic.rowInsets)
+                        .textCase(nil)  // The routine title is not a shouty label.
                     }
                 }
             }
-            .padding(.horizontal)
-            .padding(.bottom, 16)
         }
+        .listStyle(.plain)
     }
 
     // MARK: Data
 
     private func load() async {
         do {
-            let output = try await context.client.api.getRoutineBoard(.init())
-            switch output {
-            case .ok(let ok):
-                board = .loaded(try ok.body.json)
-            case .unauthorized:
-                appState.handleUnauthorized()
-            default:
-                board = .failed("Something went wrong loading routines.")
+            // Members ride along for the detail sheet's avatar/name lookups.
+            async let boardCall = context.client.api.getRoutineBoard(.init())
+            async let membersCall = context.client.api.listMembers(.init())
+            let (boardOut, membersOut) = try await (boardCall, membersCall)
+
+            if case .unauthorized = boardOut { appState.handleUnauthorized(); return }
+            if case .unauthorized = membersOut { appState.handleUnauthorized(); return }
+            guard case .ok(let boardOK) = boardOut, case .ok(let membersOK) = membersOut else {
+                fail("Something went wrong loading routines.")
+                return
             }
+            board = .loaded(try boardOK.body.json)
+            members = try membersOK.body.json.members
         } catch {
             guard !isTaskCancellation(error) else { return }  // D08
-            // Keep stale entries visible when the home server is unreachable.
-            if board.value == nil { board = .failed("Couldn't reach your home server.") }
+            fail("Couldn't reach your home server.")
         }
+    }
+
+    /// Keep stale entries visible; only an empty screen fails hard.
+    private func fail(_ message: String) {
+        if board.value == nil { board = .failed(message) }
     }
 
     enum TaskAction {
@@ -322,68 +436,73 @@ struct RoutinesView: View {
     }
 }
 
-// MARK: - Routine card
+// MARK: - Routine section header
 
-private struct RoutineCardView: View {
+/// The routine's identity row — replaces the old card chrome. Tapping it (not
+/// the task rows) still opens the detail sheet.
+private struct RoutineSectionHeader: View {
     let entry: Components.Schemas.RoutineBoardEntry
-    let highlighted: Bool
-    let busyTaskIds: Set<String>
-    let onAction: (RoutinesView.TaskAction, Components.Schemas.RoutineBoardEntry.TasksPayloadPayload) -> Void
+    let phase: RoutinesBoardLogic.Phase
+    let onTap: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            header
-            ProgressView(value: RoutinesBoardLogic.progress(of: entry))
-                .tint(entry.complete ? .green : .cyan)
-            ForEach(entry.tasks, id: \.taskId) { task in
-                RoutineTaskRow(
-                    task: task,
-                    busy: busyTaskIds.contains(task.taskId),
-                    onAction: { onAction($0, task) }
-                )
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 10) {
+                    EmojiView(emoji: entry.emoji, font: .title2)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(entry.title)
+                            .font(.headline)
+                            .fontDesign(.rounded)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text(RoutinesBoardLogic.headerCaption(
+                            windowStart: entry.windowStart,
+                            windowEnd: entry.windowEnd,
+                            phase: phase
+                        ))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    }
+                    Spacer(minLength: 6)
+                    if phase == .now { nowPill }
+                    if RoutinesBoardLogic.showsStreakBadge(entry.streak) {
+                        Text("🔥\(entry.streak)")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    if entry.complete {
+                        Text("All done ✓")
+                            .font(.caption.weight(.semibold))
+                            .fontDesign(.rounded)
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.green.opacity(0.12), in: .capsule)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                ProgressView(value: RoutinesBoardLogic.progress(of: entry))
+                    .tint(entry.complete ? .green : .cyan)
             }
+            .frame(minHeight: RoutinesBoardLogic.tapTarget)  // D27
+            .contentShape(.rect)
         }
-        .padding(14)
-        .background(Color(.secondarySystemBackground), in: .rect(cornerRadius: 16))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(borderColor, lineWidth: 1.5)
-        )
+        .buttonStyle(.plain)
+        .accessibilityLabel("Show \(entry.title) details")
     }
 
-    private var borderColor: Color {
-        if entry.complete { return .green.opacity(0.4) }
-        if highlighted { return .cyan.opacity(0.45) }
-        return .clear
-    }
-
-    private var header: some View {
-        HStack(spacing: 10) {
-            EmojiView(emoji: entry.emoji, font: .title2)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(entry.title)
-                    .font(.headline)
-                    .fontDesign(.rounded)
-                Text("\(entry.windowStart)–\(entry.windowEnd)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            Spacer()
-            if RoutinesBoardLogic.showsStreakBadge(entry.streak) {
-                Text("🔥\(entry.streak)")
-                    .font(.subheadline.weight(.semibold))
-            }
-            if entry.complete {
-                Text("All done ✓")
-                    .font(.caption.weight(.semibold))
-                    .fontDesign(.rounded)
-                    .foregroundStyle(.green)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(.green.opacity(0.12), in: .capsule)
-            }
-        }
+    /// The one badge the phase headings used to carry.
+    private var nowPill: some View {
+        Text("Now")
+            .font(.caption2.weight(.bold))
+            .fontDesign(.rounded)
+            .foregroundStyle(.cyan)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(.cyan.opacity(0.15), in: .capsule)
     }
 }
 
@@ -413,31 +532,39 @@ private struct RoutineTaskRow: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
             }
-            recoveryButton
             statusControl
         }
         .contentShape(.rect)
-        .contextMenu {
-            if task.status == .open {
-                // Skip preserves the streak, no stars.
-                Button("Skip", systemImage: "arrow.uturn.forward") { onAction(.skip) }
-            } else {
-                Button("Un-do", systemImage: "arrow.uturn.backward") { onAction(.undo) }
+        // M9c: circle completes, swipe does the rest — no inline Skip/Un-do.
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if RoutinesBoardLogic.recoveryEdge(for: task.status) == .trailing {
+                // Skip preserves the streak, no stars; reversible, so no dialog.
+                Button {
+                    onAction(.skip)
+                } label: {
+                    Label("Skip", systemImage: "arrow.uturn.forward")
+                }
+                .tint(.orange)
+                .disabled(busy)
+                .accessibilityLabel("Skip \(task.title)")
+            }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            if RoutinesBoardLogic.recoveryEdge(for: task.status) == .leading {
+                Button {
+                    onAction(.undo)
+                } label: {
+                    Label("Un-do", systemImage: "arrow.uturn.backward")
+                }
+                .tint(.blue)
+                .disabled(busy)
+                .accessibilityLabel(undoLabel)
             }
         }
     }
 
-    /// D27: Skip / Un-do as a visible button, not a long-press secret.
-    private var recoveryButton: some View {
-        Button(RoutinesBoardLogic.recoveryActionTitle(for: task.status)) {
-            onAction(task.status == .open ? .skip : .undo)
-        }
-        .font(.caption.weight(.semibold))
-        .fontDesign(.rounded)
-        .buttonStyle(.bordered)
-        .buttonBorderShape(.capsule)
-        .tint(.secondary)
-        .disabled(busy)
+    private var undoLabel: String {
+        task.status == .skipped ? "Un-do skip of \(task.title)" : "Un-do \(task.title)"
     }
 
     /// D27: every circle is a 44pt button; tapping a checked one un-does
@@ -486,6 +613,130 @@ private struct EmojiView: View {
             Image(systemName: "sparkles")
                 .font(font)
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+// MARK: - Admin manage list
+
+/// Every routine definition (web's All-routines parity) — the only route to
+/// edit a routine with no card on today's board, or another member's.
+@MainActor
+private struct ManageRoutinesView: View {
+    let context: SignedInContext
+    let members: [Components.Schemas.Member]
+    let onChanged: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
+
+    @State private var routines: Loadable<[Components.Schemas.Routine]> = .loading
+    @State private var editing: EditTarget?
+
+    private struct EditTarget: Identifiable {
+        let routineId: String
+        var id: String { routineId }
+    }
+
+    var body: some View {
+        NavigationStack {
+            content
+                .navigationTitle("All routines")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                .task { await load() }
+                .refreshable { await load() }
+                .sheet(item: $editing) { target in
+                    RoutineFormView(
+                        context: context,
+                        members: members,
+                        mode: .edit(routineId: target.routineId)
+                    ) {
+                        onChanged()
+                        Task { await load() }
+                    }
+                }
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch routines {
+        case .loading:
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .failed(let message):
+            ContentUnavailableView {
+                Label("Can't load routines", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(message)
+            } actions: {
+                Button("Try again") { Task { await load() } }
+            }
+        case .loaded(let list):
+            if list.isEmpty {
+                ContentUnavailableView(
+                    "No routines yet.",
+                    systemImage: "sparkles",
+                    description: Text("Tap + on the Routines screen to create one.")
+                )
+            } else {
+                List(list, id: \.id) { routine in
+                    row(routine)
+                        .listRowInsets(RoutinesBoardLogic.rowInsets)
+                }
+                .listStyle(.plain)
+            }
+        }
+    }
+
+    private func row(_ routine: Components.Schemas.Routine) -> some View {
+        Button {
+            editing = EditTarget(routineId: routine.id)
+        } label: {
+            HStack(spacing: 10) {
+                EmojiView(emoji: routine.emoji, font: .title3)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(routine.title)
+                        .font(.headline)
+                        .fontDesign(.rounded)
+                    Text(RoutinesManageLogic.subtitle(
+                        windowStart: routine.windowStart,
+                        windowEnd: routine.windowEnd,
+                        assigneeCount: routine.assigneeIds.count
+                    ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(minHeight: RoutinesBoardLogic.tapTarget)  // D27
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Edit \(routine.title)")
+    }
+
+    private func load() async {
+        do {
+            switch try await context.client.api.listRoutines(.init()) {
+            case .ok(let ok):
+                routines = .loaded(RoutinesManageLogic.sorted(try ok.body.json.routines))
+            case .unauthorized:
+                appState.handleUnauthorized()
+            default:
+                if routines.value == nil { routines = .failed("The routines didn't load.") }
+            }
+        } catch {
+            guard !isTaskCancellation(error) else { return }  // D08
+            if routines.value == nil { routines = .failed("Couldn't reach your home server.") }
         }
     }
 }

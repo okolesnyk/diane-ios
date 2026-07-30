@@ -28,12 +28,13 @@ import Testing
         id: String,
         allDay: Bool = false,
         startsAt: String? = nil,
-        summary: String = "Event"
+        summary: String = "Event",
+        memberIds: [String]? = nil
     ) -> Components.Schemas.EventOccurrence {
         .init(
             id: id, eventId: "ev", calendarId: "cal", summary: summary,
             location: nil, allDay: allDay, startsAt: startsAt, endsAt: nil,
-            startDate: nil, endDate: nil, memberIds: nil, color: nil, recurrence: nil
+            startDate: nil, endDate: nil, memberIds: memberIds, color: nil, recurrence: nil
         )
     }
 
@@ -54,6 +55,18 @@ import Testing
                     status: $0.element, completedByMemberId: nil, completedAt: nil
                 )
             }
+        )
+    }
+
+    private func member(
+        _ id: String,
+        sortOrder: Int,
+        name: String? = nil
+    ) -> Components.Schemas.Member {
+        .init(
+            id: id, name: name ?? id, color: "#FF6B6B", avatar: nil, birthday: nil,
+            role: .kid, sortOrder: sortOrder, hasPassword: false, hasPasskeys: false,
+            passwordResetRequired: false, createdAt: "2026-01-01T00:00:00.000Z"
         )
     }
 
@@ -225,14 +238,22 @@ import Testing
         #expect(!TodayLogic.windowContains(clock: 12 * 60, start: "21:00", end: "06:00"))
     }
 
-    @Test func activeRoutinesKeepOnlyMineInsideTheWindow() {
-        let active = TodayLogic.activeRoutines([
-            entry(member: "me", start: "06:00", end: "12:00"),
+    // R8: my list is MY WHOLE DAY (like every other member's block) — the
+    // in-window entries just come first and carry the "Now" flag.
+    @Test func myRoutinesShowTheWholeDayWithInWindowFirst() {
+        let mine = TodayLogic.myRoutines([
             entry(member: "me", start: "18:00", end: "20:00"),
             entry(member: "sis", start: "06:00", end: "12:00"),
-        ], me: "me", clock: 7 * 60)
-        #expect(active.map(\.windowStart) == ["06:00"])
-        #expect(active.allSatisfy { $0.memberId == "me" })
+            entry(member: "me", start: "06:00", end: "12:00"),
+            entry(member: "me", start: "05:00", end: "06:30"),
+        ], me: "me", clock: 6 * 60)
+        // Never another member's board.
+        #expect(mine.allSatisfy { $0.entry.memberId == "me" })
+        // Nothing dropped: the 18:00 routine is still listed, just not "Now".
+        #expect(mine.count == 3)
+        // In-window first, board order kept inside each group.
+        #expect(mine.map(\.entry.windowStart) == ["06:00", "05:00", "18:00"])
+        #expect(mine.map(\.isNow) == [true, true, false])
     }
 
     @Test func clockMinutesUsesTheGivenTimeZone() {
@@ -242,13 +263,296 @@ import Testing
     }
 
     // D05: the screen feeds the ticking household clock ("HH:mm") into the
-    // window filter — at 06:50 the 07:00 routine is absent, at 07:00 present.
+    // window test — at 06:50 the 07:00 routine is listed but not "Now", at
+    // 07:00 it lights up (R8: the tick changes the pill, not the roster).
     @Test func windowOpeningAppearsOnTheMinuteTick() {
         let board = [entry(member: "me", start: "07:00", end: "08:30")]
-        let before = TodayLogic.activeRoutines(board, me: "me", clock: TodayLogic.minutes("06:50") ?? -1)
-        let opening = TodayLogic.activeRoutines(board, me: "me", clock: TodayLogic.minutes("07:00") ?? -1)
-        #expect(before.isEmpty)
-        #expect(opening.count == 1)
+        let before = TodayLogic.myRoutines(board, me: "me", clock: TodayLogic.minutes("06:50") ?? -1)
+        let opening = TodayLogic.myRoutines(board, me: "me", clock: TodayLogic.minutes("07:00") ?? -1)
+        #expect(before.map(\.isNow) == [false])
+        #expect(opening.map(\.isNow) == [true])
+    }
+
+    // MARK: Family hub
+
+    @Test func familyDaysListTheOthersBySortOrderNeverMe() {
+        let days = TodayLogic.familyDays(
+            members: [member("mom", sortOrder: 2), member("me", sortOrder: 0), member("dad", sortOrder: 1)],
+            me: "me", occurrences: [], routines: [], events: []
+        )
+        #expect(days.map(\.member.id) == ["dad", "mom"])
+    }
+
+    @Test func familyDaysBreakSortOrderTiesByName() {
+        let days = TodayLogic.familyDays(
+            members: [
+                member("zoe", sortOrder: 1, name: "Zoe"),
+                member("amy", sortOrder: 1, name: "Amy"),
+                member("me", sortOrder: 0),
+            ],
+            me: "me", occurrences: [], routines: [], events: []
+        )
+        #expect(days.map(\.member.id) == ["amy", "zoe"])
+    }
+
+    // D06 matrix reused on the hub: open rows go to their OWNER (claimer
+    // beats assignee); done rows count for owner-else-completer; unowned
+    // pool rows stay off family blocks — they live in "My day".
+    @Test func familyDaysAttributeChoresLikeD06() {
+        let days = TodayLogic.familyDays(
+            members: [member("me", sortOrder: 0), member("sis", sortOrder: 1)],
+            me: "me",
+            occurrences: [
+                chore(id: "sis-own", assignee: "sis"),
+                chore(id: "claimed-by-sis", assignee: "me", claimedBy: "sis"),
+                chore(id: "claimed-away", assignee: "sis", claimedBy: "me"),
+                chore(id: "pool"),
+                chore(id: "done-sis-by-me", status: .completed, assignee: "sis", completedBy: "me"),
+                chore(id: "done-pool-by-sis", status: .completed, completedBy: "sis"),
+                chore(id: "done-mine", status: .completed, assignee: "me", completedBy: "me"),
+            ],
+            routines: [],
+            events: []
+        )
+        #expect(days.count == 1)
+        #expect(days[0].openChores.map(\.id) == ["sis-own", "claimed-by-sis"])
+        #expect(days[0].doneCount == 2)
+    }
+
+    // The hub shows the member's WHOLE day — no window cut (that filter is
+    // only for MY actionable list); board order kept.
+    @Test func familyRoutinesAreTheWholeDayNotWindowCut() {
+        let days = TodayLogic.familyDays(
+            members: [member("me", sortOrder: 0), member("sis", sortOrder: 1)],
+            me: "me",
+            occurrences: [],
+            routines: [
+                entry(member: "sis", start: "06:00", end: "09:00"),
+                entry(member: "me", start: "06:00", end: "09:00"),
+                entry(member: "sis", start: "18:00", end: "20:00"),
+            ],
+            events: []
+        )
+        #expect(days[0].routines.map(\.windowStart) == ["06:00", "18:00"])
+        #expect(days[0].routines.allSatisfy { $0.memberId == "sis" })
+    }
+
+    @Test func freeDayOnlyWhenTrulyNothing() {
+        let days = TodayLogic.familyDays(
+            members: [member("me", sortOrder: 0), member("kid", sortOrder: 1), member("mom", sortOrder: 2)],
+            me: "me",
+            occurrences: [chore(id: "done", status: .completed, assignee: "mom", completedBy: "mom")],
+            routines: [],
+            events: []
+        )
+        #expect(days[0].member.id == "kid")
+        #expect(days[0].isFree)
+        // A "1 done ✓" line is still a day.
+        #expect(!days[1].isFree)
+        #expect(days[1].doneCount == 1)
+    }
+
+    // MARK: Family events (R6)
+
+    // R6: the matrix. A member's events are the ones whose memberIds CONTAINS
+    // their id; a multi-member event lands on every one of them; a
+    // whole-family event (memberIds nil) belongs to the shared Today section
+    // and must NOT be duplicated onto anyone's block; a member with none
+    // gets none.
+    @Test func familyEventsFollowMemberIdsAndNeverDuplicateWholeFamily() {
+        let days = TodayLogic.familyDays(
+            members: [
+                member("me", sortOrder: 0),
+                member("wife", sortOrder: 1),
+                member("kid", sortOrder: 2),
+                member("gran", sortOrder: 3),
+            ],
+            me: "me",
+            occurrences: [],
+            routines: [],
+            events: [
+                event(id: "dentist", startsAt: "2026-07-27T14:00:00Z", memberIds: ["wife"]),
+                event(id: "carpool", startsAt: "2026-07-27T16:00:00Z", memberIds: ["wife", "kid"]),
+                event(id: "cookout", allDay: true, memberIds: nil),
+                event(id: "mine", startsAt: "2026-07-27T09:00:00Z", memberIds: ["me"]),
+            ]
+        )
+        let byMember = Dictionary(uniqueKeysWithValues: days.map { ($0.member.id, $0.events.map(\.id)) })
+        #expect(byMember["wife"] == ["dentist", "carpool"])
+        #expect(byMember["kid"] == ["carpool"])
+        #expect(byMember["gran"] == [])
+        // The whole-family event never reaches a member block.
+        #expect(days.allSatisfy { !$0.events.map(\.id).contains("cookout") })
+        // And my own events don't leak onto anyone else's.
+        #expect(days.allSatisfy { !$0.events.map(\.id).contains("mine") })
+    }
+
+    // R6: a member block sorts events like the shared list — all-day first,
+    // then by start.
+    @Test func familyEventsSortAllDayFirstThenByStart() {
+        let days = TodayLogic.familyDays(
+            members: [member("me", sortOrder: 0), member("wife", sortOrder: 1)],
+            me: "me",
+            occurrences: [],
+            routines: [],
+            events: [
+                event(id: "late", startsAt: "2026-07-27T20:00:00Z", memberIds: ["wife"]),
+                event(id: "trip", allDay: true, memberIds: ["wife"]),
+                event(id: "early", startsAt: "2026-07-27T08:00:00Z", memberIds: ["wife"]),
+            ]
+        )
+        #expect(days[0].events.map(\.id) == ["trip", "early", "late"])
+    }
+
+    // R6: the headline bug — "Free day ✨" printed under a member who has
+    // appointments. Events are plans; an event alone ends the free day.
+    @Test func aMemberWithOnlyAnEventIsNotFree() {
+        let days = TodayLogic.familyDays(
+            members: [member("me", sortOrder: 0), member("wife", sortOrder: 1), member("gran", sortOrder: 2)],
+            me: "me",
+            occurrences: [],
+            routines: [],
+            events: [
+                event(id: "yoga", startsAt: "2026-07-27T15:00:00Z", memberIds: ["wife"]),
+                event(id: "cookout", allDay: true, memberIds: nil),
+            ]
+        )
+        #expect(days[0].member.id == "wife")
+        #expect(!days[0].isFree)
+        // Gran only has the whole-family event, which isn't hers to carry.
+        #expect(days[1].member.id == "gran")
+        #expect(days[1].isFree)
+    }
+
+    @Test func memberEventsIgnoreEmptyAndForeignTags() {
+        let events = [
+            event(id: "hers", memberIds: ["wife"]),
+            event(id: "family", memberIds: nil),
+            event(id: "nobody", memberIds: []),
+        ]
+        #expect(TodayLogic.memberEvents(events, member: "wife").map(\.id) == ["hers"])
+        #expect(TodayLogic.memberEvents(events, member: "kid").isEmpty)
+    }
+
+    // MARK: Sheet payloads (R3)
+
+    // R3: the routine sheet FREEZES the board date it was opened with. A live
+    // `boardDate` reload at household midnight would flip RoutineDetailView's
+    // `boardDate != today` guard to "fresh" and re-arm task actions against
+    // yesterday's snapshot.
+    @Test func routineSheetPayloadFreezesTheBoardDate() {
+        let opened = "2026-07-26"
+        let sheet = TodayView.ActiveSheet.routine(
+            entry: entry(member: "me", start: "06:00", end: "09:00"),
+            boardDate: opened
+        )
+        guard case .routine(let payloadEntry, let frozen) = sheet else {
+            Issue.record("expected the routine case")
+            return
+        }
+        #expect(frozen == opened)
+        #expect(payloadEntry.memberId == "me")
+        // Household midnight rolls "today" forward; the frozen date still
+        // reads stale (the guard is boardDate != today).
+        #expect(frozen != "2026-07-27")
+        // The id ignores the date, so a refresh never re-presents the sheet.
+        #expect(sheet.id == "routine-r-me-06:00-me")
+    }
+
+    // MARK: Row accessibility labels (R13)
+
+    // R13: Today rows are real Buttons, each with one curated VoiceOver
+    // label — the trait and the announcement arrive together.
+    @Test func rowLabelsReadTheWholeRow() {
+        #expect(TodayLogic.eventRowLabel(
+            event(id: "e", startsAt: "2026-07-27T18:30:00Z", summary: "Dentist"),
+            timeZone: newYork
+        ) == "Dentist, at 14:30")
+        #expect(TodayLogic.eventRowLabel(
+            event(id: "e", allDay: true, summary: "Trip"), timeZone: newYork
+        ) == "Trip, all day")
+        // Unparseable start: the summary alone, never a dangling comma.
+        #expect(TodayLogic.eventRowLabel(
+            event(id: "e", startsAt: nil, summary: "Mystery"), timeZone: newYork
+        ) == "Mystery")
+
+        #expect(TodayLogic.choreRowLabel(chore(id: "Dishes", late: true, assignee: "me"))
+            == "Dishes, 2 stars, late")
+        #expect(TodayLogic.choreRowLabel(
+            chore(id: "Dishes", status: .completed, assignee: "me", completedBy: "mom"),
+            names: ["mom": "Mom"]
+        ) == "Dishes, 2 stars, done, by Mom")
+
+        let board = entry(member: "me", start: "06:00", end: "09:00", statuses: [.completed, .open, .open])
+        #expect(TodayLogic.routineRowLabel(board, isNow: true) == "Routine, now, 1 of 3 done")
+        #expect(TodayLogic.routineRowLabel(board, isNow: false) == "Routine, 1 of 3 done")
+    }
+
+    // MARK: Uncheck
+
+    // Kiosk trust: the circle flips a done row back to open — no matter who
+    // owns it or checked it — and completes an open one.
+    @Test func circleActionFlipsOnCompletionState() {
+        #expect(TodayLogic.circleAction(for: chore(id: "open", assignee: "me")) == .complete)
+        #expect(TodayLogic.circleAction(for: chore(id: "pool")) == .complete)
+        #expect(TodayLogic.circleAction(
+            for: chore(id: "done", status: .completed, assignee: "me", completedBy: "me")
+        ) == .uncomplete)
+        #expect(TodayLogic.circleAction(
+            for: chore(id: "done-other", status: .completed, assignee: "sis", completedBy: "mom")
+        ) == .uncomplete)
+    }
+
+    // MARK: Swipe actions (M9c)
+
+    // M9c: exactly two surfaces — the circle, and swipe. Swipe carries claim
+    // (unowned open rows), put back (anything claimed, D27) and dismiss (any
+    // open row, D23); a done row offers none of them, because the circle
+    // un-checks it.
+    @Test func swipeActionsMirrorTheChoresBoardRules() {
+        let pool = TodayLogic.swipeActions(for: chore(id: "pool"))
+        #expect(pool == .init(canClaim: true, canPutBack: false, canDismiss: true))
+
+        let claimed = TodayLogic.swipeActions(for: chore(id: "claimed", claimedBy: "me"))
+        #expect(claimed == .init(canClaim: false, canPutBack: true, canDismiss: true))
+
+        // Assigned rows are neither claimable nor put-backable — still dismissable.
+        let assigned = TodayLogic.swipeActions(for: chore(id: "assigned", assignee: "me"))
+        #expect(assigned == .init(canClaim: false, canPutBack: false, canDismiss: true))
+
+        // D27: anyone may put back a sibling's claim.
+        let claimedBySis = TodayLogic.swipeActions(for: chore(id: "hers", claimedBy: "sis"))
+        #expect(claimedBySis.canPutBack)
+
+        // A completed row strands nothing: uncomplete lives on the circle.
+        let done = TodayLogic.swipeActions(
+            for: chore(id: "done", status: .completed, assignee: "me", completedBy: "me")
+        )
+        #expect(done == .init())
+        #expect(TodayLogic.circleAction(for: chore(
+            id: "done", status: .completed, assignee: "me", completedBy: "me"
+        )) == .uncomplete)
+    }
+
+    // D24: dismiss is permanent, so the confirm names the chore.
+    @Test func dismissPromptNamesTheChore() {
+        #expect(TodayLogic.dismissPrompt("Dishes") == "Dismiss \u{201C}Dishes\u{201D}?")
+    }
+
+    // MARK: Routine progress lines
+
+    @Test func routineProgressLabelCountsResolvedAndCelebratesAllDone() {
+        let base = (start: "06:00", end: "07:00")
+        #expect(TodayLogic.routineProgressLabel(of: entry(
+            member: "m", start: base.start, end: base.end, statuses: [.completed, .skipped, .open]
+        )) == "2 of 3")
+        #expect(TodayLogic.routineProgressLabel(of: entry(
+            member: "m", start: base.start, end: base.end, statuses: [.open, .open]
+        )) == "0 of 2")
+        // Skips resolve too — the line celebrates a finished board.
+        #expect(TodayLogic.routineProgressLabel(of: entry(
+            member: "m", start: base.start, end: base.end, statuses: [.completed, .skipped]
+        )) == "All done ✓")
     }
 
     // MARK: Progress, balance, misc

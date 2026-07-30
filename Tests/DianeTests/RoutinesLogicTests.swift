@@ -1,5 +1,6 @@
 import DianeKit
 import Foundation
+import SwiftUI
 import Testing
 
 @testable import Diane
@@ -104,6 +105,51 @@ import Testing
         // D27: circles are HIG-sized for kid fingers, like the web's 44px.
         @Test func tapTargetMeetsHIGMinimum() {
             #expect(RoutinesBoardLogic.tapTarget == 44)
+        }
+
+        // M9c: Skip swipes from the trailing edge while the task is open.
+        @Test func openTasksSkipFromTheTrailingEdge() {
+            #expect(RoutinesBoardLogic.recoveryEdge(for: .open) == .trailing)
+        }
+
+        // M9c: resolved tasks come back from the leading edge — one recovery
+        // action per row, never both.
+        @Test func resolvedTasksUndoFromTheLeadingEdge() {
+            #expect(RoutinesBoardLogic.recoveryEdge(for: .completed) == .leading)
+            #expect(RoutinesBoardLogic.recoveryEdge(for: .skipped) == .leading)
+        }
+    }
+
+    @Suite struct Density {
+        // M9c: rows run flush to the screen edge, 16pt gutter only.
+        @Test func rowInsetsMatchTheSharedContract() {
+            let insets = RoutinesBoardLogic.rowInsets
+            #expect(insets.leading == 16)
+            #expect(insets.trailing == 16)
+            #expect(insets.top == 8)
+            #expect(insets.bottom == 8)
+        }
+    }
+
+    @Suite struct HeaderCaption {
+        // The "Now" pill says the phase, so the caption doesn't repeat it.
+        @Test func nowPhaseShowsWindowOnly() {
+            #expect(
+                RoutinesBoardLogic.headerCaption(windowStart: "06:00", windowEnd: "12:00", phase: .now)
+                    == "06:00–12:00"
+            )
+        }
+
+        // Off-phase routines keep the wording the old phase headings carried.
+        @Test func otherPhasesAppendTheirTitle() {
+            #expect(
+                RoutinesBoardLogic.headerCaption(windowStart: "18:00", windowEnd: "23:59", phase: .laterToday)
+                    == "18:00–23:59 · Later today"
+            )
+            #expect(
+                RoutinesBoardLogic.headerCaption(windowStart: "06:00", windowEnd: "08:00", phase: .earlier)
+                    == "06:00–08:00 · Earlier"
+            )
         }
     }
 
@@ -238,6 +284,61 @@ import Testing
         @Test func shownFromTwoUp() {
             #expect(RoutinesBoardLogic.showsStreakBadge(2))
             #expect(RoutinesBoardLogic.showsStreakBadge(14))
+        }
+    }
+
+    @Suite struct ManageList {
+        private func routine(
+            _ id: String,
+            title: String = "Routine",
+            start: String = "06:00",
+            end: String = "12:00",
+            sortOrder: Int = 0,
+            assignees: [String] = ["m1"]
+        ) -> Components.Schemas.Routine {
+            Components.Schemas.Routine(
+                id: id,
+                title: title,
+                windowStart: start,
+                windowEnd: end,
+                assigneeIds: assignees,
+                tasks: [],
+                sortOrder: sortOrder,
+                createdAt: "2026-01-01T00:00:00Z"
+            )
+        }
+
+        // Admin touch-reorder (sortOrder) is the canonical order (web parity).
+        @Test func sortsBySortOrderFirst() {
+            let sorted = RoutinesManageLogic.sorted([
+                routine("b", start: "05:00", sortOrder: 2),
+                routine("a", start: "18:00", sortOrder: 1),
+            ])
+            #expect(sorted.map(\.id) == ["a", "b"])
+        }
+
+        @Test func equalSortOrderFallsBackToWindowTitleId() {
+            let sorted = RoutinesManageLogic.sorted([
+                routine("late", start: "18:00", end: "21:00"),
+                routine("z", title: "Zebra"),
+                routine("a2", title: "Aardvark"),
+                routine("a1", title: "Aardvark"),
+            ])
+            #expect(sorted.map(\.id) == ["a1", "a2", "z", "late"])
+        }
+
+        @Test func subtitleShowsWindowAndAssigneeCount() {
+            #expect(
+                RoutinesManageLogic.subtitle(windowStart: "06:00", windowEnd: "12:00", assigneeCount: 2)
+                    == "06:00–12:00 · 2 members"
+            )
+        }
+
+        @Test func singleAssigneeIsSingular() {
+            #expect(
+                RoutinesManageLogic.subtitle(windowStart: "18:00", windowEnd: "23:59", assigneeCount: 1)
+                    == "18:00–23:59 · 1 member"
+            )
         }
     }
 

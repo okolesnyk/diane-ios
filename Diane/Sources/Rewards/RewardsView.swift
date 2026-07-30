@@ -137,51 +137,77 @@ struct RewardsView: View {
         }
     }
 
+    /// M9c: plain edge-to-edge list; hairlines group, no cards.
     private func loadedList(_ loaded: RewardsData) -> some View {
         List {
             Section {
                 balanceHeader(loaded.balance)
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
             }
 
-            Section("Store") {
+            Section {
                 if loaded.rewards.isEmpty {
                     Text("No rewards in the store yet.")
                         .foregroundStyle(.secondary)
+                        .listRowInsets(Self.rowInsets)
                 } else {
+                    // Not a list — the grid keeps its two columns but runs
+                    // edge-to-edge like everything else.
                     storeGrid(loaded)
                         .listRowBackground(Color.clear)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 8, trailing: 0))
+                        .listRowSeparator(.hidden)
                 }
+            } header: {
+                sectionHeader("Store")
             }
 
             if !loaded.waiting.isEmpty {
                 Section {
                     ForEach(loaded.waiting, id: \.id) { redemption in
                         waitingRow(redemption, members: loaded.membersByID)
+                            .listRowInsets(Self.rowInsets)
                     }
                 } header: {
-                    Text("Waiting")
+                    sectionHeader("Waiting")
                 } footer: {
                     if !context.session.isAdmin {
                         Text("A parent will make it happen ✨")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 12, trailing: 16))
                     }
                 }
             }
 
             if !loaded.done.isEmpty {
-                Section("Done") {
+                Section {
                     ForEach(loaded.done, id: \.id) { redemption in
                         doneRow(redemption, members: loaded.membersByID)
+                            .listRowInsets(Self.rowInsets)
                     }
+                } header: {
+                    sectionHeader("Done")
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
     }
 
     // MARK: Sections
+
+    /// Shared density contract: rows flush to the screen edge.
+    private static var rowInsets: EdgeInsets { EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16) }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .textCase(.uppercase)
+            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
+    }
 
     private func balanceHeader(_ balance: Int) -> some View {
         VStack(spacing: 2) {
@@ -238,48 +264,34 @@ struct RewardsView: View {
             Text("★ \(redemption.costStars)")
                 .font(.system(.subheadline, design: .rounded, weight: .bold))
                 .foregroundStyle(.orange)
-            // D25/D27: visible controls, not swipe-only; 44pt targets.
-            if RewardsLogic.canFulfill(redemption, isAdmin: context.session.isAdmin) {
-                rowActionButton("checkmark.circle", tint: .green, label: "Mark \(redemption.title) done") {
-                    Task { await fulfill(redemption) }
-                }
-            }
-            if RewardsLogic.canReturn(redemption) {
-                rowActionButton("arrow.uturn.backward.circle", tint: .secondary, label: "Return stars for \(redemption.title)") {
-                    Task { await returnStars(redemption) }
-                }
-            }
         }
+        .frame(minHeight: 44)  // D27
+        .contentShape(.rect)
+        // M9c: swipe is the one action surface — no duplicate inline buttons.
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if RewardsLogic.canFulfill(redemption, isAdmin: context.session.isAdmin) {
-                Button("Mark done") { Task { await fulfill(redemption) } }
-                    .tint(.green)
-            }
-            if RewardsLogic.canReturn(redemption) {  // D25
-                Button("Return stars", role: .destructive) { Task { await returnStars(redemption) } }
-            }
-        }
-        .contextMenu {
-            if RewardsLogic.canFulfill(redemption, isAdmin: context.session.isAdmin) {
-                Button("Mark done", systemImage: "checkmark.circle") { Task { await fulfill(redemption) } }
-            }
-            if RewardsLogic.canReturn(redemption) {  // D25
-                Button("Return stars", systemImage: "arrow.uturn.backward", role: .destructive) { Task { await returnStars(redemption) } }
+                Button {
+                    Task { await fulfill(redemption) }
+                } label: {
+                    Label("Mark done", systemImage: "checkmark.circle")
+                }
+                .tint(.green)
+                .accessibilityLabel("Mark \(redemption.title) done")
             }
         }
-    }
-
-    /// D25/D27: 44pt icon button usable inside a List row.
-    private func rowActionButton(_ systemImage: String, tint: Color, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.title3)
-                .foregroundStyle(tint)
-                .frame(width: 44, height: 44)
-                .contentShape(.rect)
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            // D25: Return is everyone's mis-click undo — the leading edge, like
+            // every other un-do in the app. Reversible, so no dialog.
+            if RewardsLogic.canReturn(redemption) {
+                Button {
+                    Task { await returnStars(redemption) }
+                } label: {
+                    Label("Return stars", systemImage: "arrow.uturn.backward")
+                }
+                .tint(.blue)
+                .accessibilityLabel("Return stars for \(redemption.title)")
+            }
         }
-        .buttonStyle(.borderless)
-        .accessibilityLabel(label)
     }
 
     private func doneRow(_ redemption: Components.Schemas.RewardRedemption, members: [String: Components.Schemas.Member]) -> some View {
@@ -554,9 +566,10 @@ private struct RewardCard: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
         .padding(.horizontal, 8)
+        // Plain lists sit on systemBackground — the tile needs the grey.
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemGroupedBackground))
+                .fill(Color(.secondarySystemBackground))
         )
         .opacity(starsShort == nil ? 1 : 0.55)
         .overlay {

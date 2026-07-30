@@ -37,7 +37,7 @@ enum ChoreBoard {
         var doneToday: [Occurrence] = []
     }
 
-    /// What the row's controls and context menu may offer.
+    /// What the row's two surfaces may offer.
     struct RowActions: Equatable {
         var canComplete = false
         var canUncomplete = false
@@ -45,6 +45,10 @@ enum ChoreBoard {
         var canPutBack = false
         var canDismiss = false
     }
+
+    /// M9c: a row has exactly two action surfaces — the circle, and swipe.
+    enum CircleAction: Equatable { case complete, uncomplete }
+    enum SwipeAction: Equatable { case claim, putBack, dismiss }
 
     /// Owner = claimer, else assignee; both nil = up-for-grabs pool.
     static func owner(of occurrence: Occurrence) -> String? {
@@ -134,9 +138,51 @@ enum ChoreBoard {
         return actions
     }
 
+    /// The circle toggles completion on every row, done ones included.
+    static func circleAction(for occurrence: Occurrence) -> CircleAction {
+        occurrence.status == .completed ? .uncomplete : .complete
+    }
+
+    /// Swipe right: claim / put back — pool rows only.
+    static func leadingSwipes(for occurrence: Occurrence) -> [SwipeAction] {
+        let actions = actions(for: occurrence)
+        var swipes: [SwipeAction] = []
+        if actions.canClaim { swipes.append(.claim) }
+        if actions.canPutBack { swipes.append(.putBack) }
+        return swipes
+    }
+
+    /// Swipe left: dismiss, and it always confirms first (D24).
+    static func trailingSwipes(for occurrence: Occurrence) -> [SwipeAction] {
+        actions(for: occurrence).canDismiss ? [.dismiss] : []
+    }
+
     /// D24: dismiss is permanent — the confirm dialog names the chore.
     static func dismissPrompt(_ title: String) -> String {
         "Dismiss \u{201C}\(title)\u{201D}?"
+    }
+
+    /// R13: everything the row's chips and star say, in one spoken line — the
+    /// row button carries it so VoiceOver announces an actionable summary.
+    static func rowAccessibilityLabel(
+        _ occurrence: Occurrence,
+        attribution: String? = nil,
+        completedByName: String? = nil
+    ) -> String {
+        var parts = [occurrence.title]
+        if occurrence.status == .completed {
+            parts.append("done")
+        } else if occurrence.late {
+            parts.append("late")
+        }
+        if occurrence.dueMode == .by, let due = occurrence.dueDate {
+            parts.append("by \(ChoresManageLogic.monthDay(due))")
+        }
+        if let time = occurrence.dueTime { parts.append("at \(time)") }
+        parts.append(occurrence.starValue == 1 ? "1 star" : "\(occurrence.starValue) stars")
+        if let attribution { parts.append(attribution) }
+        if let completedByName { parts.append("completed by \(completedByName)") }
+        return parts.joined(separator: ", ")
     }
 
     /// Short human copy for a 409 code (nil = the row changed under us).
@@ -167,10 +213,96 @@ enum ChoreBoard {
     }
 }
 
+/// R7: admin "All chores" list math. Chore DEFINITIONS, not today's
+/// occurrences — the only route to a chore scheduled for another day.
+enum ChoresManageLogic {
+    typealias Chore = Components.Schemas.Chore
+
+    /// Admin sort order is canonical; deterministic tie-breaks.
+    static func sorted(_ chores: [Chore]) -> [Chore] {
+        chores.sorted { ($0.sortOrder, $0.title, $0.id) < ($1.sortOrder, $1.title, $1.id) }
+    }
+
+    /// "Every Mon, Wed at 07:30" — the schedule shape plus its due time
+    /// (web scheduleSummary parity; the four shapes of packages/chores).
+    static func scheduleSummary(_ chore: Chore) -> String {
+        var summary = shapeSummary(chore)
+        if let time = chore.dueTime, !time.isEmpty { summary += " at \(time)" }
+        return summary
+    }
+
+    /// Row subtitle: schedule plus who does it (nobody = up for grabs).
+    static func subtitle(_ chore: Chore) -> String {
+        "\(scheduleSummary(chore)) · \(who(chore))"
+    }
+
+    static func who(_ chore: Chore) -> String {
+        guard !chore.upForGrabs, !chore.assigneeIds.isEmpty else { return "Up for grabs" }
+        return chore.assigneeIds.count == 1 ? "1 member" : "\(chore.assigneeIds.count) members"
+    }
+
+    /// "2026-07-20" → "Jul 20". Fixed abbreviations: pure, and the board copy
+    /// is English throughout.
+    static func monthDay(_ ymd: String) -> String {
+        let parts = ymd.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3, (1...12).contains(parts[1]) else { return ymd }
+        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        return "\(months[parts[1] - 1]) \(parts[2])"
+    }
+
+    /// Recurring / on a date / by a date / anytime — exactly one applies.
+    private static func shapeSummary(_ chore: Chore) -> String {
+        if let recurrence = chore.recurrence { return recurrenceSummary(recurrence) }
+        guard let due = chore.dueDate, !due.isEmpty else { return "Anytime" }
+        // "By a date" reads as a deadline; a one-off is the bare date.
+        return chore.dueMode == .by ? "By \(monthDay(due))" : monthDay(due)
+    }
+
+    private static func recurrenceSummary(_ recurrence: Chore.RecurrencePayload) -> String {
+        let interval = recurrence.interval ?? 1
+        switch recurrence.freq {
+        case .daily:
+            return interval == 1 ? "Daily" : "Every \(interval) days"
+        case .weekly:
+            let days = weekdayList(recurrence.byWeekday)
+            if interval == 1 { return days.map { "Every \($0)" } ?? "Weekly" }
+            return days.map { "Every \(interval) weeks on \($0)" } ?? "Every \(interval) weeks"
+        case .monthly:
+            // No byMonthDay means "the start date's day" (server rule).
+            let day = recurrence.byMonthDay
+            if interval == 1 { return day.map { "Monthly on day \($0)" } ?? "Monthly" }
+            return day.map { "Every \(interval) months on day \($0)" } ?? "Every \(interval) months"
+        }
+    }
+
+    private static func weekdayList(_ days: Chore.RecurrencePayload.ByWeekdayPayload?) -> String? {
+        guard let days, !days.isEmpty else { return nil }
+        let picked = Set(days.compactMap { FormWeekday(rawValue: $0.rawValue) })
+        guard !picked.isEmpty else { return nil }
+        return FormWeekday.sorted(picked).map(\.label).joined(separator: ", ")
+    }
+}
+
 /// One fetch pass; both tabs render from it.
 struct ChoresData {
     var occurrences: [ChoreBoard.Occurrence]
     var members: [Components.Schemas.Member]
+}
+
+/// The one sheet the chores screen presents (detail, admin create, admin manage).
+enum ChoreSheet: Identifiable, Equatable {
+    case detail(ChoreBoard.Occurrence)
+    case create
+    case manage  // R7
+
+    /// Stable per row so a data refresh never re-presents the sheet.
+    var id: String {
+        switch self {
+        case .detail(let occurrence): "detail-\(occurrence.id)"
+        case .create: "create"
+        case .manage: "manage"
+        }
+    }
 }
 
 extension Components.Schemas.ChoreActionResult.OccurrencePayload {
@@ -199,6 +331,10 @@ extension Components.Schemas.ChoreActionResult.OccurrencePayload {
 
 // MARK: - Screen
 
+/// M9c density: every chore row sits flush to the screen edge.
+private let choreRowInsets = EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+private let choreHeaderInsets = EdgeInsets(top: 10, leading: 16, bottom: 4, trailing: 16)
+
 struct ChoresView: View {
     let context: SignedInContext
     @Environment(SyncSignals.self) private var signals
@@ -210,6 +346,7 @@ struct ChoresView: View {
     @State private var busyIDs: Set<String> = []
     @State private var alertMessage: String?
     @State private var pendingDismiss: ChoreBoard.Occurrence?  // D24
+    @State private var sheet: ChoreSheet?
 
     private var myID: String { context.session.memberID }
 
@@ -229,6 +366,17 @@ struct ChoresView: View {
             }
             .navigationTitle("Chores")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                // Chore CRUD is admin-only (server enforces; UI gates too).
+                if context.session.isAdmin {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Manage") { sheet = .manage }  // R7
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("New chore", systemImage: "plus") { sheet = .create }
+                    }
+                }
+            }
         }
         // clock.today in the key refetches at household midnight (M9 spine).
         .task(id: "\(signals.version(of: [.chores, .members, .stars]))|\(clock.today)") { await load() }
@@ -248,6 +396,31 @@ struct ChoresView: View {
             Button("Cancel", role: .cancel) {}
         } message: { _ in
             Text("It goes away for good — no stars, and it won't come back.")
+        }
+        .sheet(item: $sheet) { sheet in
+            switch sheet {
+            case .detail(let occurrence):
+                ChoreDetailView(
+                    context: context,
+                    occurrence: occurrence,
+                    members: data.value?.members ?? [],
+                    onChanged: { Task { await load() } }
+                )
+            case .create:
+                ChoreFormView(
+                    context: context,
+                    members: data.value?.members ?? [],
+                    mode: .create,
+                    onSaved: { Task { await load() } }
+                )
+            case .manage:
+                // R7: off-day and future definitions live only here.
+                ManageChoresView(
+                    context: context,
+                    members: data.value?.members ?? [],
+                    onChanged: { Task { await load() } }
+                )
+            }
         }
     }
 
@@ -292,9 +465,10 @@ struct ChoresView: View {
                             row(occurrence, completedByName: completerName(occurrence, byID: byID))
                         }
                     } header: {
-                        if !board.doneToday.isEmpty { Text("Done today") }
+                        if !board.doneToday.isEmpty { sectionHeader("Done today") }
                     }
                 }
+                .listStyle(.plain)
                 .refreshable { await load() }
             }
         case .everyone:
@@ -317,9 +491,10 @@ struct ChoresView: View {
                             )
                         }
                     } header: {
-                        if !board.doneToday.isEmpty { Text("Done today") }
+                        if !board.doneToday.isEmpty { sectionHeader("Done today") }
                     }
                 }
+                .listStyle(.plain)
                 .refreshable { await load() }
             }
         }
@@ -348,13 +523,18 @@ struct ChoresView: View {
             Section {
                 ForEach(rows, id: \.id) { row($0) }
             } header: {
-                if let accent {
-                    Text(title).foregroundStyle(accent).fontWeight(.semibold)
-                } else {
-                    Text(title)
-                }
+                sectionHeader(title, accent: accent)
             }
         }
+    }
+
+    /// One header look for the whole screen: small, uppercase, flush left.
+    private func sectionHeader(_ title: String, accent: Color? = nil) -> some View {
+        Text(title)
+            .font(.caption.weight(accent == nil ? .medium : .semibold))
+            .foregroundStyle(accent ?? Color.secondary)
+            .textCase(.uppercase)
+            .listRowInsets(choreHeaderInsets)
     }
 
     private func memberSection(_ section: ChoreBoard.MemberSection) -> some View {
@@ -363,20 +543,26 @@ struct ChoresView: View {
                 Text("All done. Nice!")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .listRowInsets(choreRowInsets)
             } else {
                 ForEach(section.open, id: \.id) { row($0) }
             }
         } header: {
+            // The header carries the member identity; rows sit flush under it.
             HStack(spacing: 8) {
                 MemberAvatarView(
                     name: section.member.name,
                     colorHex: section.member.color,
                     avatar: section.member.avatar,
-                    size: 24
+                    size: 20
                 )
                 Text(section.member.name)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                Spacer(minLength: 0)
             }
-            .textCase(nil)
+            .listRowInsets(choreHeaderInsets)
         }
     }
 
@@ -388,96 +574,87 @@ struct ChoresView: View {
         completedByName: String? = nil
     ) -> some View {
         let completed = occurrence.status == .completed
-        let actions = ChoreBoard.actions(for: occurrence)
+        // M9c: two surfaces only — the circle toggles done, swipe does the rest.
+        let leading = ChoreBoard.leadingSwipes(for: occurrence)
+        let trailing = ChoreBoard.trailingSwipes(for: occurrence)
         return HStack(spacing: 12) {
-            Group {
-                if let emoji = occurrence.emoji, !emoji.isEmpty {
-                    Text(emoji).font(.system(size: 30))
-                } else {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 38)
+            // R13: the tap-to-detail area is a real Button, so VoiceOver
+            // announces it; the controls below stay siblings, never swallowed.
+            Button {
+                sheet = .detail(occurrence)
+            } label: {
+                HStack(spacing: 12) {
+                    Group {
+                        if let emoji = occurrence.emoji, !emoji.isEmpty {
+                            Text(emoji).font(.system(size: 30))
+                        } else {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 22))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(width: 38)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(occurrence.title)
-                    .font(.system(.body, design: .rounded, weight: .medium))
-                    .strikethrough(completed)
-                    .foregroundStyle(completed ? Color.secondary : Color.primary)
-                metaLine(occurrence, attribution: attribution, completedByName: completedByName)
-            }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(occurrence.title)
+                            .font(.system(.body, design: .rounded, weight: .medium))
+                            .strikethrough(completed)
+                            .foregroundStyle(completed ? Color.secondary : Color.primary)
+                        metaLine(occurrence, attribution: attribution, completedByName: completedByName)
+                    }
 
-            Spacer(minLength: 8)
-
-            if actions.canClaim {
-                capsuleButton("Claim", occurrence: occurrence) {
-                    Task { await perform(.claim, on: occurrence) }
+                    Spacer(minLength: 8)
                 }
+                .frame(minHeight: 44)  // HIG tap target
+                .contentShape(Rectangle())
             }
-            if actions.canPutBack {
-                // D27: visible undo of Claim — no long-press hunting.
-                capsuleButton("Put back", occurrence: occurrence) {
-                    Task { await perform(.unclaim, on: occurrence) }
-                }
-            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                ChoreBoard.rowAccessibilityLabel(
+                    occurrence,
+                    attribution: attribution?.name,
+                    completedByName: completedByName
+                )
+            )
+            .accessibilityHint("Opens chore details")
 
             Text("★ \(occurrence.starValue)")
                 .font(.system(.subheadline, design: .rounded, weight: .semibold))
                 .foregroundStyle(completed ? Color.secondary : Color.orange)
+                .accessibilityHidden(true)  // R13: the row button already says it
 
             completeButton(occurrence, completed: completed)
         }
-        .contextMenu { contextMenu(for: occurrence, actions: actions) }
-        // D27: swipe mirrors the row's actions.
+        .contentShape(Rectangle())
+        .listRowInsets(choreRowInsets)
+        // Swipe right: claim / put back.
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            if actions.canClaim {
+            if leading.contains(.claim) {
                 Button { Task { await perform(.claim, on: occurrence) } } label: {
                     Label("Claim", systemImage: "hand.raised")
                 }
                 .tint(.blue)
+                .accessibilityLabel("Claim \(occurrence.title)")
             }
-            if actions.canPutBack {
+            if leading.contains(.putBack) {
+                // D27: anyone may put back anyone's claim.
                 Button { Task { await perform(.unclaim, on: occurrence) } } label: {
                     Label("Put back", systemImage: "arrow.uturn.backward")
                 }
-                .tint(.indigo)
+                .tint(.blue)
+                .accessibilityLabel("Put \(occurrence.title) back")
             }
         }
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            if actions.canComplete {
-                Button { Task { await perform(.complete, on: occurrence) } } label: {
-                    Label("Complete", systemImage: "checkmark.circle")
-                }
-                .tint(.green)
-            }
-            if actions.canUncomplete {
-                Button { Task { await perform(.uncomplete, on: occurrence) } } label: {
-                    Label("Uncomplete", systemImage: "arrow.uturn.backward")
-                }
-                .tint(.orange)
-            }
-            if actions.canDismiss {
+        // Swipe left: dismiss. Never a full swipe — it's permanent.
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if trailing.contains(.dismiss) {
                 Button { pendingDismiss = occurrence } label: {  // D24: confirms first
                     Label("Dismiss", systemImage: "xmark.circle")
                 }
-                .tint(.red)
+                .tint(.orange)
+                .accessibilityLabel("Dismiss \(occurrence.title)")
             }
         }
-    }
-
-    private func capsuleButton(
-        _ title: String,
-        occurrence: ChoreBoard.Occurrence,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(title, action: action)
-            .font(.system(.subheadline, design: .rounded, weight: .semibold))
-            .buttonStyle(.bordered)
-            .buttonBorderShape(.capsule)
-            .controlSize(.small)
-            .disabled(busyIDs.contains(occurrence.id))
     }
 
     @ViewBuilder
@@ -494,7 +671,7 @@ struct ChoresView: View {
                 chip(time, .secondary)
             }
             if occurrence.dueMode == .by, let due = occurrence.dueDate {
-                Text("by \(Self.shortDate(due))")  // D07: deadline visible on the row
+                Text("by \(ChoresManageLogic.monthDay(due))")  // D07: deadline visible on the row
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -522,8 +699,10 @@ struct ChoresView: View {
 
     private func completeButton(_ occurrence: ChoreBoard.Occurrence, completed: Bool) -> some View {
         Button {
-            // D27: tapping a checked circle un-checks it — no long-press hunting.
-            Task { await perform(completed ? .uncomplete : .complete, on: occurrence) }
+            // The circle is the ONLY complete/uncomplete surface, done rows included.
+            let call: RowCall = ChoreBoard.circleAction(for: occurrence) == .uncomplete
+                ? .uncomplete : .complete
+            Task { await perform(call, on: occurrence) }
         } label: {
             Image(systemName: completed ? "checkmark.circle.fill" : "circle")
                 .font(.system(size: 28))
@@ -535,30 +714,6 @@ struct ChoresView: View {
         .buttonStyle(.borderless)
         .disabled(busyIDs.contains(occurrence.id))
         .accessibilityLabel(completed ? "Uncomplete \(occurrence.title)" : "Complete \(occurrence.title)")
-    }
-
-    @ViewBuilder
-    private func contextMenu(for occurrence: ChoreBoard.Occurrence, actions: ChoreBoard.RowActions) -> some View {
-        if actions.canUncomplete {
-            Button("Uncomplete", systemImage: "arrow.uturn.backward") {
-                Task { await perform(.uncomplete, on: occurrence) }
-            }
-        }
-        if actions.canClaim {
-            Button("Claim", systemImage: "hand.raised") {
-                Task { await perform(.claim, on: occurrence) }
-            }
-        }
-        if actions.canPutBack {
-            Button("Put back", systemImage: "arrow.uturn.backward") {
-                Task { await perform(.unclaim, on: occurrence) }
-            }
-        }
-        if actions.canDismiss {
-            Button("Dismiss", systemImage: "xmark.circle", role: .destructive) {
-                pendingDismiss = occurrence  // D24: confirm before the permanent dismiss
-            }
-        }
     }
 
     // MARK: Data + actions
@@ -703,13 +858,133 @@ struct ChoresView: View {
         }
         data = .loaded(loaded)
     }
+}
 
-    /// "2026-07-30" → "Jul 30", built in the local calendar (never via UTC).
-    private static func shortDate(_ ymd: String) -> String {
-        let parts = ymd.split(separator: "-").compactMap { Int($0) }
-        guard parts.count == 3,
-              let date = Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
-        else { return ymd }
-        return date.formatted(.dateTime.month(.abbreviated).day())
+// MARK: - Admin manage list
+
+/// R7: every chore DEFINITION — the only route to a chore that isn't in
+/// today's actionable view (another day, a future start, a finished series).
+@MainActor
+private struct ManageChoresView: View {
+    let context: SignedInContext
+    let members: [Components.Schemas.Member]
+    let onChanged: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
+
+    @State private var chores: Loadable<[Components.Schemas.Chore]> = .loading
+    @State private var editing: EditTarget?
+
+    private struct EditTarget: Identifiable {
+        let choreId: String
+        var id: String { choreId }
+    }
+
+    var body: some View {
+        NavigationStack {
+            content
+                .navigationTitle("All chores")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+                .task { await load() }
+                .refreshable { await load() }
+                .sheet(item: $editing) { target in
+                    ChoreFormView(
+                        context: context,
+                        members: members,
+                        mode: .edit(choreId: target.choreId)
+                    ) {
+                        onChanged()
+                        Task { await load() }
+                    }
+                }
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch chores {
+        case .loading:
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .failed(let message):
+            ContentUnavailableView {
+                Label("Can't load chores", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(message)
+            } actions: {
+                Button("Try again") { Task { await load() } }
+            }
+        case .loaded(let list):
+            if list.isEmpty {
+                ContentUnavailableView(
+                    "No chores yet.",
+                    systemImage: "sparkles",
+                    description: Text("Tap + on the Chores screen to create one.")
+                )
+            } else {
+                List(list, id: \.id) { chore in
+                    row(chore)
+                }
+                .listStyle(.plain)
+            }
+        }
+    }
+
+    private func row(_ chore: Components.Schemas.Chore) -> some View {
+        Button {
+            editing = EditTarget(choreId: chore.id)
+        } label: {
+            HStack(spacing: 10) {
+                if let emoji = chore.emoji, !emoji.isEmpty {
+                    Text(emoji).font(.title3).frame(width: 30)
+                } else {
+                    Image(systemName: "sparkles")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 30)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(chore.title)
+                        .font(.headline)
+                        .fontDesign(.rounded)
+                    Text(ChoresManageLogic.subtitle(chore))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("★ \(chore.starValue)")
+                    .font(.system(.subheadline, design: .rounded, weight: .semibold))
+                    .foregroundStyle(.orange)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(minHeight: 44)  // HIG tap target
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(choreRowInsets)
+        .accessibilityLabel("Edit \(chore.title), \(ChoresManageLogic.subtitle(chore))")
+    }
+
+    private func load() async {
+        do {
+            switch try await context.client.api.listChores(.init()) {
+            case .ok(let ok):
+                chores = .loaded(ChoresManageLogic.sorted(try ok.body.json.chores))
+            case .unauthorized:
+                appState.handleUnauthorized()
+            default:
+                if chores.value == nil { chores = .failed("The chores didn't load.") }
+            }
+        } catch {
+            guard !isTaskCancellation(error) else { return }  // D08
+            if chores.value == nil { chores = .failed("Couldn't reach your home server.") }
+        }
     }
 }
