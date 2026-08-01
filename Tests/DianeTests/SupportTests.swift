@@ -206,21 +206,16 @@ import Testing
             }
         }
 
-        @Test func offIsTheAbsenceOfAValue() {
-            #expect(ChoreReminderLogic.label(nil) == "Off")
-            #expect(ChoreReminderLogic.label("18:00") == "18:00")
-            #expect(ChoreReminderLogic.label("07:05") == "07:05")
-            // A value the server could never have stored still reads as off,
-            // never as a time the family would trust.
-            #expect(ChoreReminderLogic.label("24:00") == "Off")
-            #expect(ChoreReminderLogic.label("") == "Off")
-        }
-
-        @Test func theDraftSeedsFromTheStoredTimeAndFallsBackWhenOff() {
+        // The row is a bare picker now, so whatever it shows is a time the
+        // server can ring at — a stored value it could never have written
+        // (or none at all) falls back rather than being displayed.
+        @Test func theDraftSeedsFromTheStoredTimeAndFallsBackOtherwise() {
             #expect(ChoreReminderLogic.draft(nil) == ChoreReminderLogic.fallback)
             #expect(ChoreReminderLogic.isValid(ChoreReminderLogic.fallback))
             #expect(ChoreReminderLogic.draft("07:30") == "07:30")
             #expect(ChoreReminderLogic.draft("nonsense") == ChoreReminderLogic.fallback)
+            #expect(ChoreReminderLogic.draft("24:00") == ChoreReminderLogic.fallback)
+            #expect(ChoreReminderLogic.draft("") == ChoreReminderLogic.fallback)
         }
 
         // Turning the reminder OFF is a literal null, not an omitted key: the

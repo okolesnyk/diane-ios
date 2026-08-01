@@ -3,16 +3,15 @@ import SwiftUI
 
 // MARK: - Reminder-time logic (pure, tested in SupportTests)
 
-/// A member's OWN default chore-reminder time: the wire's "HH:mm", or nil for
-/// off. Per member, never per household — one shared chore rings each assignee
-/// at their own time.
+/// A member's OWN default chore-reminder time: the wire's "HH:mm". Per member,
+/// never per household — one shared chore rings each assignee at their own time.
 ///
 /// The server validates `^([01]\d|2[0-3]):[0-5]\d$`, so mirror it here and let
 /// nothing malformed leave the phone. Deliberately stricter than the ICU
 /// reading of that pattern: only ASCII digits count, because zod's `\d` on the
 /// server is ASCII-only.
 enum ChoreReminderLogic {
-    /// What the picker offers first when the reminder is off.
+    /// What a member who has never chosen one gets.
     static let fallback = "18:00"
 
     /// nil = not a valid wire time.
@@ -34,12 +33,6 @@ enum ChoreReminderLogic {
 
     static func isValid(_ text: String) -> Bool { parse(text) != nil }
 
-    /// The row's value — the app shows raw "HH:mm" everywhere else.
-    static func label(_ stored: String?) -> String {
-        guard let stored, isValid(stored) else { return "Off" }
-        return stored
-    }
-
     /// What the picker starts on: the stored time, else the fallback.
     static func draft(_ stored: String?) -> String {
         guard let stored, isValid(stored) else { return fallback }
@@ -59,10 +52,10 @@ enum ChoreReminderLogic {
     }
 }
 
-/// PATCH /members/:id carrying only this one key. The generated client omits
-/// nil optionals and the route reads an absent key as "keep", so turning the
-/// reminder OFF needs a literal null on the wire — the same reason the forms
-/// hand-encode their bodies (see FormPatch).
+/// PATCH /members/:id carrying only this one key. The field is nullable on the
+/// wire; the app only ever sets a time, but the encoder stays explicit because
+/// synthesized `Codable` omits nil and the route reads an absent key as "keep"
+/// — a null would silently become a no-op (see FormPatch).
 struct MemberReminderPatch: Encodable, Sendable {
     var choreReminderTime: String?
 
@@ -87,10 +80,12 @@ struct SettingsView: View {
     @Environment(HouseholdClock.self) private var clock
     @Environment(\.dismiss) private var dismiss
 
-    /// The stored value; `.loaded(nil)` is a real answer — off.
-    @State private var reminder: Loadable<String?> = .loading
+    @State private var reminder: Loadable<Void> = .loading
+    /// What the picker shows and what gets saved.
     @State private var draft = ChoreReminderLogic.fallback
-    @State private var saving = false
+    /// The last value the server confirmed — the guard against re-saving it.
+    @State private var saved: String?
+    @State private var saveTask: Task<Void, Never>?
     @State private var reminderError: String?
 
     var body: some View {
@@ -155,14 +150,16 @@ struct SettingsView: View {
             }
         }
         .task { await loadReminder() }
+        .onChange(of: draft) { _, value in scheduleSave(value) }
     }
 
-    /// My own default reminder time — the only preference this screen edits.
+    /// One row: my own default reminder time. No save button — picking IS the
+    /// save.
     private var choresSection: some View {
         Section {
             switch reminder {
             case .loading:
-                LabeledContent("My reminder time") { ProgressView() }
+                LabeledContent("Chore default reminder time") { ProgressView() }
                     .listRowInsets(settingsRowInsets)
             case .failed(let message):
                 VStack(alignment: .leading, spacing: 8) {
@@ -173,65 +170,26 @@ struct SettingsView: View {
                         .frame(minHeight: 28)
                 }
                 .listRowInsets(settingsRowInsets)
-            case .loaded(let stored):
-                reminderRows(stored)
+            case .loaded:
+                // The picker runs on the HOUSEHOLD clock — the server fires at
+                // household-local time, so a travelling phone must not shift it.
+                DatePicker(
+                    "Default reminder time",
+                    selection: FormDates.timeBinding($draft, timeZone: clock.timeZone),
+                    displayedComponents: .hourAndMinute
+                )
+                .environment(\.timeZone, clock.timeZone)
+                .listRowInsets(settingsRowInsets)
+
+                if let reminderError {
+                    Text(reminderError)
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                        .listRowInsets(settingsRowInsets)
+                }
             }
         } header: {
             header("Chores")
-        } footer: {
-            Text(
-                """
-                This is yours alone — everyone in the family sets their own. \
-                Chores that have a date but no time of their own remind you at \
-                this time, in your household's time zone. Off means they don't \
-                remind you at all.
-                """
-            )
-            .listRowInsets(settingsHeaderInsets)
-        }
-    }
-
-    @ViewBuilder
-    private func reminderRows(_ stored: String?) -> some View {
-        LabeledContent("My reminder time", value: ChoreReminderLogic.label(stored))
-            .listRowInsets(settingsRowInsets)
-
-        // The picker runs on the HOUSEHOLD clock — the time the server fires at
-        // is household-local, so a travelling phone must not shift it.
-        DatePicker(
-            "Remind me at",
-            selection: FormDates.timeBinding($draft, timeZone: clock.timeZone),
-            displayedComponents: .hourAndMinute
-        )
-        .environment(\.timeZone, clock.timeZone)
-        .disabled(saving)
-        .listRowInsets(settingsRowInsets)
-
-        Button {
-            Task { await save(draft) }
-        } label: {
-            HStack {
-                Text(stored == nil ? "Turn reminders on" : "Save reminder time")
-                Spacer()
-                if saving { ProgressView() }
-            }
-            .frame(minHeight: 28)
-        }
-        .disabled(saving || draft == stored)
-        .listRowInsets(settingsRowInsets)
-
-        if stored != nil {
-            Button("Turn reminders off") { Task { await save(nil) } }
-                .disabled(saving)
-                .frame(minHeight: 28)
-                .listRowInsets(settingsRowInsets)
-        }
-
-        if let reminderError {
-            Text(reminderError)
-                .font(.subheadline)
-                .foregroundStyle(.red)
-                .listRowInsets(settingsRowInsets)
         }
     }
 
@@ -262,8 +220,13 @@ struct SettingsView: View {
             switch try await context.client.api.getMember(.init(path: .init(id: id))) {
             case .ok(let ok):
                 let stored = try ok.body.json.choreReminderTime
-                reminder = .loaded(stored)
+                saved = ChoreReminderLogic.isValid(stored ?? "") ? stored : nil
                 draft = ChoreReminderLogic.draft(stored)
+                reminder = .loaded(())
+                // Never chosen one: write the fallback now, so the row shows a
+                // time the server will actually ring at. There is no "off"
+                // switch any more — a default that does nothing isn't one.
+                if saved == nil { await save(draft) }
             case .unauthorized:
                 appState.handleUnauthorized()
             default:
@@ -282,10 +245,21 @@ struct SettingsView: View {
         reminder = .failed(message)
     }
 
-    private func save(_ value: String?) async {
-        guard !saving else { return }
-        saving = true
-        defer { saving = false }
+    /// The picker fires on every wheel tick, so let the choice settle before
+    /// spending a request on it. A newer pick cancels the older save outright —
+    /// including one already in flight, so the last pick is the one that lands.
+    private func scheduleSave(_ value: String) {
+        guard case .loaded = reminder, value != saved else { return }
+        saveTask?.cancel()
+        saveTask = Task {
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled else { return }
+            await save(value)
+        }
+    }
+
+    private func save(_ value: String) async {
+        guard ChoreReminderLogic.isValid(value) else { return }
         reminderError = nil
         do {
             let outcome = try await FormPatch.send(
@@ -295,10 +269,7 @@ struct SettingsView: View {
             )
             switch outcome {
             case .ok:
-                // The server accepted it; refetch so the row shows what it
-                // actually stored, not what we hoped.
-                reminder = .loaded(value)
-                await loadReminder()
+                saved = value
             case .unauthorized:
                 appState.handleUnauthorized()
             case .rejected(let code):
