@@ -76,6 +76,9 @@ private let settingsHeaderInsets = EdgeInsets(top: 10, leading: 16, bottom: 4, t
 
 struct SettingsView: View {
     let context: SignedInContext
+    /// M9e top-bar rule: pushed as a PAGE from the avatar (no own stack, no
+    /// Done button). The legacy sheet presentation keeps both.
+    var asPage: Bool = false
     @Environment(AppState.self) private var appState
     @Environment(HouseholdClock.self) private var clock
     @Environment(\.dismiss) private var dismiss
@@ -89,7 +92,18 @@ struct SettingsView: View {
     @State private var reminderError: String?
 
     var body: some View {
-        NavigationStack {
+        Group {
+            if asPage {
+                content
+            } else {
+                NavigationStack { content }
+            }
+        }
+        .task { await loadReminder() }
+        .onChange(of: draft) { _, value in scheduleSave(value) }
+    }
+
+    private var content: some View {
             List {
                 Section {
                     HStack(spacing: 14) {
@@ -144,13 +158,12 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                if !asPage {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
-        }
-        .task { await loadReminder() }
-        .onChange(of: draft) { _, value in scheduleSave(value) }
     }
 
     /// One row: my own default reminder time. No save button — picking IS the

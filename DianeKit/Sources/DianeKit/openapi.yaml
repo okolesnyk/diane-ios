@@ -455,6 +455,8 @@ components:
             - lat
             - lon
             - label
+        modules:
+          $ref: "#/components/schemas/HouseholdModules"
         createdAt:
           type: string
       required:
@@ -462,7 +464,21 @@ components:
         - name
         - tz
         - weatherLocation
+        - modules
         - createdAt
+    HouseholdModules:
+      type: object
+      properties:
+        chores:
+          type: boolean
+        routines:
+          type: boolean
+        rewards:
+          type: boolean
+      required:
+        - chores
+        - routines
+        - rewards
     HouseholdUpdate:
       type: object
       properties:
@@ -493,6 +509,15 @@ components:
             - lat
             - lon
             - label
+        modules:
+          type: object
+          properties:
+            chores:
+              type: boolean
+            routines:
+              type: boolean
+            rewards:
+              type: boolean
     CalendarAccountList:
       type: object
       properties:
@@ -1473,6 +1498,12 @@ components:
             - completedAt
         starsAwarded:
           type: integer
+        totalStarsAwarded:
+          type: integer
+        completedOwnerIds:
+          type: array
+          items:
+            type: string
       required:
         - occurrence
         - starsAwarded

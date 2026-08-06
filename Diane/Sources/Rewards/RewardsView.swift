@@ -94,7 +94,7 @@ struct RewardsView: View {
     @State private var celebrationCount = 0
 
     var body: some View {
-        NavigationStack {
+        Group { // M9e: the caller owns the NavigationStack (tab wrap or Apps push)
             content
                 .navigationTitle("Rewards")
                 .task(id: signals.version(of: [.rewards, .stars, .members])) { await load() }

@@ -17,6 +17,9 @@ final class HouseholdClock {
     private(set) var today: String
     /// Household-local "HH:mm" — comparable to routine windowStart/End.
     private(set) var minute: String
+    /// The module switchboard (M9e) — rides the same getHousehold fetch and
+    /// the same settings-changed refresh the timezone does.
+    private(set) var modules = ModuleSwitchboard()
 
     /// The instant the current today/minute were computed from — `tomorrow`
     /// must share the same frame as `today`, never re-read the real clock.
@@ -48,14 +51,20 @@ final class HouseholdClock {
         }
     }
 
-    /// Re-fetch the household tz (called on settings changes; a tz edit on
-    /// the kiosk must reframe every screen).
+    /// Re-fetch the household tz + module switchboard (called on settings
+    /// changes; a tz edit or a module flip on any client must reframe here).
     func refreshTimeZone(client: DianeClient) async {
         guard let output = try? await client.api.getHousehold(),
               case .ok(let ok) = output,
-              let household = try? ok.body.json,
-              let tz = TimeZone(identifier: household.tz)
+              let household = try? ok.body.json
         else { return }
+        let switchboard = ModuleSwitchboard(
+            chores: household.modules.chores,
+            routines: household.modules.routines,
+            rewards: household.modules.rewards
+        )
+        if switchboard != modules { modules = switchboard }
+        guard let tz = TimeZone(identifier: household.tz) else { return }
         timeZone = tz
         tick()
     }

@@ -174,7 +174,7 @@ struct CalendarWeekView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        Group { // M9e: the caller owns the NavigationStack (tab wrap or Apps push)
             VStack(spacing: 0) {
                 weekStrip
                 Divider()

@@ -188,7 +188,7 @@ struct RoutinesView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        Group { // M9e: the caller owns the NavigationStack (tab wrap or Apps push)
             content
                 .navigationTitle("Routines")
                 // D04: clock.today in the key refetches at household midnight.
