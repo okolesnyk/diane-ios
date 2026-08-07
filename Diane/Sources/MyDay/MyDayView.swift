@@ -22,6 +22,9 @@ struct MyDayView: View {
     @State private var actionError: String?
     @State private var inFlight: Set<String> = []
 
+    /// Member tint — the same device-local switch Family Day reads.
+    @AppStorage("memberTint") private var tintOn = true
+
     private let rowInsets = EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
 
     struct DayData: Equatable {
@@ -204,7 +207,7 @@ struct MyDayView: View {
                     ForEach(Array(timeline.enumerated()), id: \.element.id) { index, item in
                         if index == nowIndex { nowLine }
                         switch item {
-                        case .event(let event): eventRow(event, calendars: loaded.calendars, names: memberNames)
+                        case .event(let event): eventRow(event, calendars: loaded.calendars)
                         case .chore(let chore): choreRow(chore, late: chore.late)
                         }
                     }
@@ -289,8 +292,7 @@ struct MyDayView: View {
 
     private func eventRow(
         _ event: MyDayLogic.Event,
-        calendars: [MyDayLogic.CalendarInfo],
-        names: [String: String]
+        calendars: [MyDayLogic.CalendarInfo]
     ) -> some View {
         HStack(spacing: 10) {
             VStack(alignment: .trailing, spacing: 0) {
@@ -316,9 +318,7 @@ struct MyDayView: View {
                             .font(.body)
                             // The past is the record: finished things read struck.
                             .strikethrough(phase == .past, color: .secondary)
-                        if let with = MyDayLogic.withSub(event, me: me, names: names) {
-                            Text(with).font(.caption).foregroundStyle(.secondary)
-                        } else if let location = event.location, !location.isEmpty {
+                        if let location = event.location, !location.isEmpty {
                             Text(location).font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -326,9 +326,47 @@ struct MyDayView: View {
                 }
                 .contentShape(Rectangle())
             }
+            whoBadge(owners: FamilyDayLogic.owners(of: event))
         }
         .opacity(phase == .future ? 0.55 : phase == .past ? 0.75 : 1)
         .listRowInsets(rowInsets)
+        .listRowBackground(tintWash(owners: FamilyDayLogic.owners(of: event)))
+    }
+
+    /// Family Day's exact row furniture: facepile for owned rows, the house
+    /// glyph for whole-family ones, and the 10% member wash behind both.
+    @ViewBuilder
+    private func whoBadge(owners: [String]) -> some View {
+        if owners.isEmpty {
+            Text("🏠").font(.subheadline)
+        } else {
+            HStack(spacing: -7) {
+                ForEach(owners.prefix(3), id: \.self) { id in
+                    if let member = memberLookup[id] {
+                        MemberAvatarView(
+                            name: member.name,
+                            colorHex: member.color,
+                            avatar: nil,
+                            size: 22
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var memberLookup: [String: Components.Schemas.Member] {
+        Dictionary(uniqueKeysWithValues: (data.value?.members ?? []).map { ($0.id, $0) })
+    }
+
+    @ViewBuilder
+    private func tintWash(owners: [String]) -> some View {
+        if tintOn, !owners.isEmpty {
+            let colors = owners.compactMap { memberLookup[$0]?.color }.compactMap { Color(hex: $0) }
+            if let style = bandedTint(colors) {
+                Rectangle().fill(style)
+            }
+        }
     }
 
     private func choreRow(_ chore: MyDayLogic.Chore, late: Bool) -> some View {
@@ -363,6 +401,7 @@ struct MyDayView: View {
                 }
                 .contentShape(Rectangle())
             }
+            whoBadge(owners: FamilyDayLogic.owners(of: chore))
             if chore.starValue > 0 {
                 Text("★ \(chore.starValue)")
                     .font(.caption.weight(.semibold))
@@ -370,6 +409,7 @@ struct MyDayView: View {
             }
         }
         .listRowInsets(rowInsets)
+        .listRowBackground(tintWash(owners: FamilyDayLogic.owners(of: chore)))
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if chore.status == .open && phase != .past {
                 Button("Dismiss") { confirmDismiss = chore }

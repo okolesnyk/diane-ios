@@ -229,14 +229,6 @@ enum MyDayLogic {
         return "\(dayPart) \(time)"
     }
 
-    /// "with Marta" — the shared-event sub (the page's one member carrier).
-    static func withSub(_ event: Event, me: String, names: [String: String]) -> String? {
-        guard let ids = event.memberIds, !ids.isEmpty else { return nil }
-        let others = ids.filter { $0 != me }.compactMap { names[$0] }
-        guard !others.isEmpty, ids.contains(me) else { return nil }
-        return "with \(others.joined(separator: ", "))"
-    }
-
     // MARK: - Calendar-color rails (owner rule: strip = calendar, tint = member)
 
     static func railColorHex(for event: Event, calendars: [CalendarInfo]) -> String? {
