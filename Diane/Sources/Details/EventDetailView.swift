@@ -145,6 +145,9 @@ struct EventDetailView: View {
     let occurrence: Components.Schemas.EventOccurrence
     let members: [Components.Schemas.Member]
     let onChanged: () -> Void
+    /// Pushed as a page (nav rule 2: drill-downs push) — no own stack, no
+    /// Done button; the sheet presentation keeps both.
+    var asPage = false
 
     @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
@@ -161,11 +164,13 @@ struct EventDetailView: View {
         context: SignedInContext,
         occurrence: Components.Schemas.EventOccurrence,
         members: [Components.Schemas.Member],
-        onChanged: @escaping () -> Void
+        onChanged: @escaping () -> Void,
+        asPage: Bool = false
     ) {
         self.context = context
         self.occurrence = occurrence
         self.members = members
+        self.asPage = asPage
         self.onChanged = onChanged
         _selectedMemberIds = State(initialValue: Set(occurrence.memberIds ?? []))
     }
@@ -179,7 +184,12 @@ struct EventDetailView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        Group {
+            if asPage { detailList } else { NavigationStack { detailList } }
+        }
+    }
+
+    private var detailList: some View {
             List {
                 headerSection
                 if let location = occurrence.location, !location.isEmpty {
@@ -195,8 +205,10 @@ struct EventDetailView: View {
             .navigationTitle("Event")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                if !asPage {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                    }
                 }
             }
             .task { await loadCalendars() }
@@ -220,7 +232,6 @@ struct EventDetailView: View {
                     dismiss()
                 }
             }
-        }
     }
 
     // MARK: Sections

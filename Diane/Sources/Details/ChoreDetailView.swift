@@ -88,6 +88,9 @@ struct ChoreDetailView: View {
     let context: SignedInContext
     let members: [Components.Schemas.Member]
     let onChanged: () -> Void
+    /// Pushed as a page (nav rule 2: drill-downs push) — no own stack, no
+    /// Done button; the sheet presentation keeps both.
+    var asPage = false
 
     @State private var occurrence: Components.Schemas.ChoreOccurrence
 
@@ -103,11 +106,13 @@ struct ChoreDetailView: View {
         context: SignedInContext,
         occurrence: Components.Schemas.ChoreOccurrence,
         members: [Components.Schemas.Member],
-        onChanged: @escaping () -> Void
+        onChanged: @escaping () -> Void,
+        asPage: Bool = false
     ) {
         self.context = context
         self.members = members
         self.onChanged = onChanged
+        self.asPage = asPage
         _occurrence = State(initialValue: occurrence)
     }
 
@@ -116,7 +121,12 @@ struct ChoreDetailView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        Group {
+            if asPage { detailList } else { NavigationStack { detailList } }
+        }
+    }
+
+    private var detailList: some View {
             List {
                 headerSection
                 if let notes = occurrence.notes, !notes.isEmpty {
@@ -145,8 +155,10 @@ struct ChoreDetailView: View {
             .navigationTitle("Chore")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                if !asPage {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { dismiss() }
+                    }
                 }
                 if context.session.isAdmin {
                     ToolbarItem(placement: .topBarLeading) {
@@ -168,7 +180,6 @@ struct ChoreDetailView: View {
                     dismiss()
                 }
             }
-        }
     }
 
     // MARK: Sections

@@ -14,7 +14,26 @@ struct RootTabView: View {
     /// and sessions are never fully released (review M9).
     @State private var sse = SSEClient()
     @State private var fourthTab: FourthTabStore
+    /// One member filter for the whole app (owner 2026-08-06).
+    @State private var filter = MemberFilterStore()
+    /// Which tab is showing. DEBUG builds accept `-uiTab <0…3>` at launch so
+    /// screenshots can reach any page without a human tapping (simctl can
+    /// capture the screen but cannot tap).
+    @State private var tab = RootTabView.launchTab
     @Environment(\.scenePhase) private var scenePhase
+
+    /// DEBUG screenshot hook; always 0 in release.
+    static var launchTab: Int {
+        #if DEBUG
+        if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-uiTab"),
+           index + 1 < ProcessInfo.processInfo.arguments.count,
+           let value = Int(ProcessInfo.processInfo.arguments[index + 1]),
+           (0...3).contains(value) {
+            return value
+        }
+        #endif
+        return 0
+    }
 
     init(context: SignedInContext) {
         self.context = context
@@ -26,22 +45,27 @@ struct RootTabView: View {
             pinned: fourthTab.pinned,
             modules: clock.modules
         )
-        TabView {
+        TabView(selection: $tab) {
             MyDayView(context: context)
                 .tabItem { Label("My Day", systemImage: "sun.max") }
+                .tag(0)
             FamilyDayView(context: context)
                 .tabItem { Label("Family Day", systemImage: "person.3") }
+                .tag(1)
             AppsView(context: context)
                 .tabItem { Label("Apps", systemImage: "square.grid.2x2") }
-            NavigationStack { ModuleScreen(module: effective, context: context) }
+                .tag(2)
+            NavigationStack { ModuleScreen(module: effective, context: context, isRoot: true) }
                 .tabItem { Label(effective.title, systemImage: effective.systemImage) }
                 // A different module is a different tab identity — rebuild,
                 // don't morph, so per-screen state never leaks across.
                 .id(effective)
+                .tag(3)
         }
         .environment(signals)
         .environment(clock)
         .environment(fourthTab)
+        .environment(filter)
         // The stream tears down only on real backgrounding — transient
         // .inactive (control center, permission alerts, app switcher peek)
         // must not flap the connection and force full refetches (review M9).
@@ -78,10 +102,29 @@ struct RootTabView: View {
 struct ModuleScreen: View {
     let module: DianeModule
     let context: SignedInContext
+    /// Root = a tab's own screen (title left, avatar right); pushed from
+    /// Apps it wears ‹ Back and a centered title instead (nav rule 1).
+    var isRoot = false
 
+    @ViewBuilder
     var body: some View {
+        if isRoot && module != .calendar {
+            // Calendar carries its own bar; the others get the root chrome.
+            VStack(spacing: 0) {
+                DianeTopBar(context: context, title: module.title)
+                content
+            }
+            .dianeRootChrome()
+        } else {
+            content
+                .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         switch module {
-        case .calendar: CalendarWeekView(context: context)
+        case .calendar: CalendarPageView(context: context)
         case .chores: ChoresView(context: context)
         case .routines: RoutinesView(context: context)
         case .rewards: RewardsView(context: context)

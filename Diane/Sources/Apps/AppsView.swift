@@ -14,8 +14,10 @@ struct AppsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 14) {
+            VStack(spacing: 0) {
+                DianeTopBar(context: context, title: "Apps")
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 14) {
                     ForEach(NavigationLogic.enabledModules(clock.modules)) { module in
                         NavigationLink(value: module) {
                             tile(title: module.title, systemImage: module.systemImage)
@@ -38,13 +40,13 @@ struct AppsView: View {
                         tile(title: future.title, systemImage: future.systemImage, comingLater: true)
                     }
                 }
-                .padding(16)
+                    .padding(16)
+                }
             }
-            .navigationTitle("Apps")
+            .dianeRootChrome()
             .navigationDestination(for: DianeModule.self) { module in
                 ModuleScreen(module: module, context: context)
             }
-            .toolbar { SettingsAvatarButton(context: context) }
         }
     }
 
