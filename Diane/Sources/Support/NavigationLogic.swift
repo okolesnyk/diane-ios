@@ -117,6 +117,15 @@ final class FourthTabStore {
         self.defaults = defaults
         key = "fourthTab.\(memberID)"
         pinned = DianeModule(rawValue: defaults.string(forKey: key) ?? "") ?? .calendar
+        #if DEBUG
+        // Screenshot hook, twin of RootTabView's -uiTab: pinning is a
+        // long-press and simctl cannot tap. Never compiled into release.
+        if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-uiModule"),
+           index + 1 < ProcessInfo.processInfo.arguments.count,
+           let module = DianeModule(rawValue: ProcessInfo.processInfo.arguments[index + 1]) {
+            pinned = module
+        }
+        #endif
     }
 
     func pin(_ module: DianeModule) {

@@ -33,7 +33,13 @@ final class MemberFilterStore {
 
     /// Long-press: solo this member, or return to everyone if already solo.
     func solo(_ id: String) {
-        selected = selected == [id] ? [] : [id]
+        solo([id])
+    }
+
+    /// Solo a set — Chores solos a member together with the "Anyone" pool
+    /// chip, since unowned chores stay everyone's business.
+    func solo(_ ids: Set<String>) {
+        selected = selected == ids ? [] : ids
     }
 
     func clear() {

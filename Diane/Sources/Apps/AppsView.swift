@@ -11,9 +11,11 @@ struct AppsView: View {
     @Environment(FourthTabStore.self) private var fourthTab
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 14)]
+    /// Modules and the details they open share this stack (nav rule 2).
+    @State private var path = NavigationPath()
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             VStack(spacing: 0) {
                 DianeTopBar(context: context, title: "Apps")
                 ScrollView {
@@ -45,7 +47,7 @@ struct AppsView: View {
             }
             .dianeRootChrome()
             .navigationDestination(for: DianeModule.self) { module in
-                ModuleScreen(module: module, context: context)
+                ModuleScreen(module: module, context: context, open: { path.append($0) })
             }
         }
     }

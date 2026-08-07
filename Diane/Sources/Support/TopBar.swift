@@ -22,6 +22,10 @@ struct DianeTopBar: View {
     /// attaching it to the bar centred it over the whole width.
     var popover: Binding<Bool>?
     var popoverContent: (() -> AnyView)?
+    /// A page-level destination of the page's own, sitting just before the
+    /// avatar — Chores puts History here (owner 2026-08-06). Rare by design:
+    /// the bar stays title-left, avatar-right everywhere else.
+    var trailing: AnyView?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -42,6 +46,7 @@ struct DianeTopBar: View {
                     .controlSize(.mini)
             }
             Spacer(minLength: 8)
+            if let trailing { trailing }
             NavigationLink {
                 SettingsView(context: context, asPage: true)
             } label: {

@@ -20,6 +20,9 @@ struct RootTabView: View {
     /// screenshots can reach any page without a human tapping (simctl can
     /// capture the screen but cannot tap).
     @State private var tab = RootTabView.launchTab
+    /// The fourth tab's own stack — module pages push chore/event details
+    /// onto it (nav rule 2: details open from anywhere).
+    @State private var modulePath = NavigationPath()
     @Environment(\.scenePhase) private var scenePhase
 
     /// DEBUG screenshot hook; always 0 in release.
@@ -55,7 +58,14 @@ struct RootTabView: View {
             AppsView(context: context)
                 .tabItem { Label("Apps", systemImage: "square.grid.2x2") }
                 .tag(2)
-            NavigationStack { ModuleScreen(module: effective, context: context, isRoot: true) }
+            NavigationStack(path: $modulePath) {
+                ModuleScreen(
+                    module: effective,
+                    context: context,
+                    isRoot: true,
+                    open: { modulePath.append($0) }
+                )
+            }
                 .tabItem { Label(effective.title, systemImage: effective.systemImage) }
                 // A different module is a different tab identity — rebuild,
                 // don't morph, so per-screen state never leaks across.
@@ -105,27 +115,52 @@ struct ModuleScreen: View {
     /// Root = a tab's own screen (title left, avatar right); pushed from
     /// Apps it wears ‹ Back and a centered title instead (nav rule 1).
     var isRoot = false
+    /// Push a chore/event detail onto whichever stack owns this screen.
+    var open: (DetailRoute) -> Void = { _ in }
 
     @ViewBuilder
     var body: some View {
         if isRoot && module != .calendar {
             // Calendar carries its own bar; the others get the root chrome.
             VStack(spacing: 0) {
-                DianeTopBar(context: context, title: module.title)
+                DianeTopBar(
+                    context: context,
+                    title: module.title,
+                    trailing: barAccessory.map { AnyView($0) }
+                )
                 content
             }
             .dianeRootChrome()
         } else {
             content
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    if let barAccessory {
+                        ToolbarItem(placement: .topBarTrailing) { barAccessory }
+                    }
+                }
         }
+    }
+
+    /// The one module with a destination of its own in the bar (owner
+    /// 2026-08-06: History goes up top, as the mock drew it).
+    private var barAccessory: AnyView? {
+        guard module == .chores else { return nil }
+        return AnyView(
+            NavigationLink {
+                ChoreHistoryView(context: context)
+            } label: {
+                Image(systemName: "clock").font(.title3)
+            }
+            .accessibilityLabel("History")
+        )
     }
 
     @ViewBuilder
     private var content: some View {
         switch module {
         case .calendar: CalendarPageView(context: context)
-        case .chores: ChoresView(context: context)
+        case .chores: ChoresPageView(context: context, open: open)
         case .routines: RoutinesView(context: context)
         case .rewards: RewardsView(context: context)
         }

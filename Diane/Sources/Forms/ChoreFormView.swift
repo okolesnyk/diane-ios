@@ -348,17 +348,22 @@ struct ChoreFormView: View {
     let context: SignedInContext
     let members: [Components.Schemas.Member]
     let mode: ChoreFormMode
+    /// A create opened from a dated section starts on that day (the Chores
+    /// page's per-section add-rows, owner verdict 2026-08-04).
+    let defaultDate: String?
     let onSaved: () -> Void
 
     init(
         context: SignedInContext,
         members: [Components.Schemas.Member],
         mode: ChoreFormMode,
+        defaultDate: String? = nil,
         onSaved: @escaping () -> Void
     ) {
         self.context = context
         self.members = members
         self.mode = mode
+        self.defaultDate = defaultDate
         self.onSaved = onSaved
     }
 
@@ -595,6 +600,10 @@ struct ChoreFormView: View {
         switch mode {
         case .create:
             state = ChoreFormLogic.State()
+            if let defaultDate {
+                state.shape = .onDay
+                state.dueDate = defaultDate
+            }
             fillEmptyDates()
             original = state  // R4
             seeded = true

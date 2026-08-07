@@ -47,6 +47,9 @@ struct CheckCircle: View {
     let locked: Bool
     let inFlight: Bool
     var size: CGFloat = 26
+    /// An unowned chore: dashed but LIVE — tap it to do it and keep the
+    /// stars. Colorless, exactly like Family Day's pool language.
+    var pool = false
     let action: () -> Void
 
     var body: some View {
@@ -69,6 +72,6 @@ struct CheckCircle: View {
 
     private var symbol: String {
         if completed { return "checkmark.circle.fill" }
-        return locked ? "circle.dashed" : "circle"
+        return locked || pool ? "circle.dashed" : "circle"
     }
 }
