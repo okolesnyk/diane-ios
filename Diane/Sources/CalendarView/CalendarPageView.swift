@@ -352,10 +352,21 @@ struct CalendarPageView: View {
                                     .listRowSeparator(.hidden)
                             }
                             ForEach(rows, id: \.id) { event in
+                                // Finished events grey in place, exactly like
+                                // Family Day (owner 2026-08-09): a past day has
+                                // ended wholesale; today asks hasEnded.
+                                let ended = d < clock.today || (d == clock.today && FamilyDayLogic.hasEnded(
+                                    event,
+                                    minute: TodayLogic.minutes(clock.minute) ?? 0,
+                                    day: d,
+                                    timeZone: clock.timeZone
+                                ))
                                 DetailRow(route: .event(event), open: open) {
                                     agendaRow(event, loaded: loaded)
                                 }
-                                .listRowBackground(tintWash(event))
+                                .grayscale(ended ? 1 : 0)
+                                .opacity(ended ? 0.5 : 1)
+                                .listRowBackground(tintWash(event).grayscale(ended ? 1 : 0))
                             }
                             if offset == 0 {
                                 // ONE add affordance: the ghost row under the
