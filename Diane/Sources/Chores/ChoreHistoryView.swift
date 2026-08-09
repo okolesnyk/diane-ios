@@ -37,14 +37,25 @@ enum ChoreHistoryLogic {
         return effective.contains(owner)
     }
 
+    /// One feed row — a shared chore-day is ONE row wearing every member's
+    /// circle (owner 2026-08-09, like the Family Day view). The grouping key
+    /// (chore + action + due date) mirrors the server's undo sibling group,
+    /// so undoing the row undoes exactly what it shows.
+    struct Row: Identifiable, Equatable {
+        let entries: [Entry]
+        var lead: Entry { entries[0] }
+        var id: String { entries[0].id }
+        var stars: Int { entries.reduce(0) { $0 + $1.starsAwarded } }
+    }
+
     struct DayGroup: Identifiable, Equatable {
         let date: String
-        let entries: [Entry]
+        let rows: [Row]
         var id: String { date }
     }
 
-    /// Newest day first, entries newest first inside it. The server already
-    /// sorts; grouping preserves that order.
+    /// Newest day first, rows newest first inside it (a group sits where its
+    /// newest entry does — the server already sorts).
     static func groups(_ entries: [Entry], timeZone: TimeZone) -> [DayGroup] {
         var order: [String] = []
         var byDay: [String: [Entry]] = [:]
@@ -56,19 +67,40 @@ enum ChoreHistoryLogic {
             byDay[day, default: []].append(entry)
         }
         return order.compactMap { day in
-            byDay[day].map { DayGroup(date: day, entries: $0) }
+            byDay[day].map { DayGroup(date: day, rows: rows($0)) }
         }
     }
 
+    /// Merge one day's entries into shared rows, preserving feed order.
+    static func rows(_ entries: [Entry]) -> [Row] {
+        var order: [String] = []
+        var byKey: [String: [Entry]] = [:]
+        for entry in entries {
+            let key = "\(entry.choreId)|\(entry.action.rawValue)|\(entry.dueDate ?? "")"
+            if byKey[key] == nil { order.append(key) }
+            byKey[key, default: []].append(entry)
+        }
+        return order.compactMap { key in byKey[key].map(Row.init) }
+    }
+
+    /// 'Ada' · 'Ada & Ben' · 'Ada, Ben & Cal' — for the undo prompts.
+    static func joinNames(_ names: [String]) -> String {
+        guard names.count > 1 else { return names.first ?? "" }
+        return names.dropLast().joined(separator: ", ") + " & " + names[names.count - 1]
+    }
+
     /// The undo prompt — the status circle always asks first (owner
-    /// 2026-08-09, matching the WebUI; yours included), naming the member
-    /// and the stars at stake.
-    static func undoPrompt(_ entry: Entry, names: [String: String]) -> String {
-        let who = (entry.completedByMemberId ?? entry.memberId).flatMap { names[$0] } ?? "their"
-        if entry.action == .dismissed { return "Bring \(entry.title) back?" }
-        return entry.starsAwarded > 0
-            ? "Undo \(who)'s check? They lose \(entry.starsAwarded) ★."
-            : "Undo \(who)'s check?"
+    /// 2026-08-09, matching the WebUI; yours included), naming the whole
+    /// crew of a shared row and the per-head stars at stake.
+    static func undoPrompt(_ row: Row, names: [String: String]) -> String {
+        let lead = row.lead
+        if lead.action == .dismissed { return "Bring \(lead.title) back?" }
+        let crew = row.entries.compactMap { actor($0).flatMap { names[$0] } }
+        let who = crew.isEmpty ? "their" : joinNames(crew)
+        let checks = crew.count > 1 ? "checks" : "check"
+        guard lead.starsAwarded > 0 else { return "Undo \(who)'s \(checks)?" }
+        let lose = crew.count > 1 ? "They each lose" : "They lose"
+        return "Undo \(who)'s \(checks)? \(lose) \(lead.starsAwarded) ★."
     }
 
     /// Who acted: the completer, else the owner (nil = a pool dismissal).
@@ -88,9 +120,9 @@ struct ChoreHistoryView: View {
     @State private var period: ChoreHistoryLogic.Period = .week
     @State private var data: Loadable<Loaded> = .loading
     @State private var loadingMore = false
-    @State private var confirmUndo: ChoreHistoryLogic.Entry?
+    @State private var confirmUndo: ChoreHistoryLogic.Row?
     /// The 409 fallback: undo again with every star award left standing.
-    @State private var confirmKeepStars: ChoreHistoryLogic.Entry?
+    @State private var confirmKeepStars: ChoreHistoryLogic.Row?
     @State private var actionError: String?
     @State private var undoing: Set<String> = []
 
@@ -132,7 +164,7 @@ struct ChoreHistoryView: View {
             isPresented: Binding(get: { confirmUndo != nil }, set: { if !$0 { confirmUndo = nil } })
         ) {
             Button("Undo", role: .destructive) {
-                if let entry = confirmUndo { Task { await undo(entry, keepStars: false) } }
+                if let row = confirmUndo { Task { await undo(row, keepStars: false) } }
                 confirmUndo = nil
             }
             Button("Cancel", role: .cancel) {}
@@ -144,7 +176,7 @@ struct ChoreHistoryView: View {
             isPresented: Binding(get: { confirmKeepStars != nil }, set: { if !$0 { confirmKeepStars = nil } })
         ) {
             Button("Undo, keep stars", role: .destructive) {
-                if let entry = confirmKeepStars { Task { await undo(entry, keepStars: true) } }
+                if let row = confirmKeepStars { Task { await undo(row, keepStars: true) } }
                 confirmKeepStars = nil
             }
             Button("Cancel", role: .cancel) {}
@@ -196,7 +228,7 @@ struct ChoreHistoryView: View {
             }
             ForEach(groups) { group in
                 Section {
-                    ForEach(group.entries, id: \.id) { entry in row(entry) }
+                    ForEach(group.rows) { row in rowView(row) }
                 } header: {
                     Text(ChoresPageLogic.dayTitle(group.date, today: clock.today))
                         .font(.caption.weight(.semibold))
@@ -224,27 +256,34 @@ struct ChoreHistoryView: View {
         .refreshable { await load() }
     }
 
-    private func row(_ entry: ChoreHistoryLogic.Entry) -> some View {
-        let dismissed = entry.action == .dismissed
+    private func rowView(_ row: ChoreHistoryLogic.Row) -> some View {
+        let lead = row.lead
+        let dismissed = lead.action == .dismissed
+        // Every actor of the shared group, one circle each (owner 2026-08-09,
+        // like Family Day) — deduped, never a typed name.
+        var seen: Set<String> = []
+        let crew = row.entries.compactMap { entry in
+            ChoreHistoryLogic.actor(entry).flatMap { id in
+                seen.insert(id).inserted ? members.first(where: { $0.id == id }) : nil
+            }
+        }
         return HStack(spacing: 10) {
-            statusCircle(entry, dismissed: dismissed)
-            if let emoji = entry.emoji { Text(emoji) }
-            Text(entry.title)
+            statusCircle(row, dismissed: dismissed)
+            if let emoji = lead.emoji { Text(emoji) }
+            Text(lead.title)
                 .foregroundStyle(dismissed ? Color.secondary : Color.primary)
             Spacer(minLength: 8)
-            Text(TodayLogic.timeLabel(entry.occurredAt, timeZone: clock.timeZone) ?? "")
+            Text(TodayLogic.timeLabel(lead.occurredAt, timeZone: clock.timeZone) ?? "")
                 .font(.caption)
                 .monospacedDigit()
                 .foregroundStyle(.tertiary)
-            // The member is a circle, like every other page (owner
-            // 2026-08-09) — never a typed name.
-            if let member = ChoreHistoryLogic.actor(entry).flatMap({ id in
-                members.first(where: { $0.id == id })
-            }) {
-                MemberAvatarView(name: member.name, colorHex: member.color, avatar: nil, size: 22)
+            HStack(spacing: crew.count > 1 ? -6 : 0) {
+                ForEach(crew, id: \.id) { member in
+                    MemberAvatarView(name: member.name, colorHex: member.color, avatar: nil, size: 22)
+                }
             }
-            if entry.starsAwarded > 0 {
-                Text("+\(entry.starsAwarded) ★")
+            if row.stars > 0 {
+                Text("+\(row.stars) ★")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
             }
@@ -255,36 +294,37 @@ struct ChoreHistoryView: View {
 
     /// The status circle IS the undo control (owner 2026-08-09, matching the
     /// WebUI): a checked circle for completed, the slashed one for dismissed.
-    /// Tapping an undoable entry always asks first — yours included; the
-    /// server says which entries still qualify (within the repeat frame).
+    /// Tapping an undoable row always asks first — yours included; the
+    /// server says which entries still qualify (within the repeat frame) and
+    /// undoes the whole shared group as one.
     @ViewBuilder
-    private func statusCircle(_ entry: ChoreHistoryLogic.Entry, dismissed: Bool) -> some View {
+    private func statusCircle(_ row: ChoreHistoryLogic.Row, dismissed: Bool) -> some View {
         let symbol = Image(systemName: dismissed ? "slash.circle" : "checkmark.circle.fill")
             .font(.system(size: 26))
             .foregroundStyle(dismissed ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.green))
-        if entry.undoable == true {
-            Button { confirmUndo = entry } label: {
+        if row.lead.undoable == true {
+            Button { confirmUndo = row } label: {
                 symbol.frame(width: 40, height: 40)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Undo \(entry.title)")
+            .accessibilityLabel("Undo \(row.lead.title)")
         } else {
             symbol.frame(width: 40, height: 40)
         }
     }
 
-    private func undo(_ entry: ChoreHistoryLogic.Entry, keepStars: Bool) async {
-        guard undoing.insert(entry.id).inserted else { return }
-        defer { undoing.remove(entry.id) }
+    private func undo(_ row: ChoreHistoryLogic.Row, keepStars: Bool) async {
+        guard undoing.insert(row.id).inserted else { return }
+        defer { undoing.remove(row.id) }
         do {
             let output = try await context.client.api.undoChoreHistory(
-                .init(path: .init(id: entry.id), body: .json(.init(keepStars: keepStars)))
+                .init(path: .init(id: row.lead.id), body: .json(.init(keepStars: keepStars)))
             )
             switch output {
             case .ok:
-                await load()  // the entry (or its whole shared group) is gone
+                await load()  // the row (its whole shared group) is gone
             case .conflict:
-                confirmKeepStars = entry  // spent stars — ask the owner's question
+                confirmKeepStars = row  // spent stars — ask the owner's question
             case .unprocessableContent:
                 actionError = "That one can't be undone any more — its next round has already started."
                 await load()

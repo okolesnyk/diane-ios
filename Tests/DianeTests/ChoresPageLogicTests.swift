@@ -382,12 +382,20 @@ struct ChoresPageLogicTests {
         #expect(ChoreHistoryLogic.range(.all, today: today) == nil)
     }
 
-    @Test func historyGroupsByLocalDayInOrder() {
+    @Test func historyGroupsByLocalDayAndMergesSharedChoreDays() {
+        // A shared chore-day (same chore + action + dueDate) is ONE row with
+        // both entries (owner 2026-08-09, like Family Day); the same chore's
+        // dismissal — and any other day — stays its own row.
         let entries: [ChoreHistoryLogic.Entry] = [
             .init(
                 id: "1", choreId: "cat", title: "Feed the cat", emoji: nil, action: .completed,
-                occurredAt: "2026-08-06T07:26:00.000Z", dueDate: today, memberId: kid,
+                occurredAt: "2026-08-06T19:26:00.000Z", dueDate: today, memberId: kid,
                 completedByMemberId: kid, starsAwarded: 1
+            ),
+            .init(
+                id: "1b", choreId: "cat", title: "Feed the cat", emoji: nil, action: .completed,
+                occurredAt: "2026-08-06T07:26:00.000Z", dueDate: today, memberId: me,
+                completedByMemberId: me, starsAwarded: 1
             ),
             .init(
                 id: "2", choreId: "plants", title: "Water the plants", emoji: nil, action: .dismissed,
@@ -397,12 +405,14 @@ struct ChoresPageLogicTests {
         ]
         let groups = ChoreHistoryLogic.groups(entries, timeZone: TimeZone(identifier: "UTC")!)
         #expect(groups.map(\.date) == ["2026-08-06", "2026-08-05"])
-        #expect(groups[0].entries.count == 1)
+        #expect(groups[0].rows.map { $0.entries.map(\.id) } == [["1", "1b"]])
+        #expect(groups[0].rows[0].stars == 2)
+        #expect(groups[1].rows.map(\.id) == ["2"])
     }
 
     /// Owner 2026-08-09: History undo always asks (the status circle is the
-    /// control, like the WebUI) — the prompt names the member and the cost;
-    /// dismissals read as "bring back".
+    /// control, like the WebUI) — the prompt names the whole crew and the
+    /// per-head cost; dismissals read as "bring back".
     @Test func historyUndoConfirmsCrossMemberAndNamesTheStars() {
         let names = [me: "Alex", kid: "Maya"]
         let theirs = ChoreHistoryLogic.Entry(
@@ -410,14 +420,29 @@ struct ChoresPageLogicTests {
             occurredAt: "2026-08-06T07:26:00.000Z", dueDate: today, memberId: kid,
             completedByMemberId: kid, starsAwarded: 1, undoable: true
         )
-        #expect(ChoreHistoryLogic.undoPrompt(theirs, names: names) == "Undo Maya's check? They lose 1 ★.")
+        let solo = ChoreHistoryLogic.Row(entries: [theirs])
+        #expect(ChoreHistoryLogic.undoPrompt(solo, names: names) == "Undo Maya's check? They lose 1 ★.")
+
+        let mine = ChoreHistoryLogic.Entry(
+            id: "1b", choreId: "cat", title: "Feed the cat", emoji: nil, action: .completed,
+            occurredAt: "2026-08-06T06:26:00.000Z", dueDate: today, memberId: me,
+            completedByMemberId: me, starsAwarded: 1, undoable: true
+        )
+        let shared = ChoreHistoryLogic.Row(entries: [theirs, mine])
+        #expect(
+            ChoreHistoryLogic.undoPrompt(shared, names: names)
+                == "Undo Maya & Alex's checks? They each lose 1 ★."
+        )
 
         let dismissed = ChoreHistoryLogic.Entry(
             id: "2", choreId: "porch", title: "Tidy the porch", emoji: nil, action: .dismissed,
             occurredAt: "2026-08-06T07:26:00.000Z", dueDate: today, memberId: me,
             completedByMemberId: nil, starsAwarded: 0, undoable: true
         )
-        #expect(ChoreHistoryLogic.undoPrompt(dismissed, names: names) == "Bring Tidy the porch back?")
+        #expect(
+            ChoreHistoryLogic.undoPrompt(.init(entries: [dismissed]), names: names)
+                == "Bring Tidy the porch back?"
+        )
     }
 
     @Test func historyFilterFollowsTheSharedChips() {
