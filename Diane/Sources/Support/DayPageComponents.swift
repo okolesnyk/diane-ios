@@ -23,10 +23,16 @@ struct DayModeNote: View {
     }
 }
 
-/// The 10% member wash with HARD color stops per owner (owner-ruled shape).
-func bandedTint(_ colors: [Color]) -> AnyShapeStyle? {
+/// The member-wash strength: 10% carries on white but vanishes on black,
+/// so dark mode runs hotter while keeping the same hue (owner 2026-08-08).
+func washOpacity(_ scheme: ColorScheme) -> Double {
+    scheme == .dark ? 0.28 : 0.1
+}
+
+/// The member wash with HARD color stops per owner (owner-ruled shape).
+func bandedTint(_ colors: [Color], opacity: Double = 0.1) -> AnyShapeStyle? {
     guard !colors.isEmpty else { return nil }
-    if colors.count == 1 { return AnyShapeStyle(colors[0].opacity(0.1)) }
+    if colors.count == 1 { return AnyShapeStyle(colors[0].opacity(opacity)) }
     let n = colors.count
     var stops: [Gradient.Stop] = []
     for (index, color) in colors.enumerated() {
@@ -35,7 +41,7 @@ func bandedTint(_ colors: [Color]) -> AnyShapeStyle? {
     }
     return AnyShapeStyle(
         LinearGradient(gradient: Gradient(stops: stops), startPoint: .topLeading, endPoint: .bottomTrailing)
-            .opacity(0.1)
+            .opacity(opacity)
     )
 }
 

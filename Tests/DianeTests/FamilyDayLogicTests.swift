@@ -69,10 +69,10 @@ import Testing
             minute: "12:00",
             timeZone: tz
         )
-        #expect(river.pool.map(\Chore.id) == ["pool"])
-        #expect(river.catchUp.map(\Chore.id) == ["late"])
+        #expect(river.pool.map(\.id) == ["pool"])
+        #expect(river.catchUp.map(\.id) == ["late"])
         #expect(river.flowing.map(\.id) == ["ch-done", "ch-timed"])
-        #expect(river.noSetTime.map(\Chore.id) == ["doneLoose", "loose"])
+        #expect(river.noSetTime.map(\.id) == ["doneLoose", "loose"])
     }
 
     @Test func poolIsImmuneToTheFilterButClaimedRowsAreNot() {
@@ -123,6 +123,46 @@ import Testing
         // Runs into tomorrow — not ended today.
         let overnight = ev("late", start: "2026-08-06T22:00:00.000Z", end: "2026-08-07T01:00:00.000Z")
         #expect(!FamilyDayLogic.hasEnded(overnight, minute: 23 * 60, day: "2026-08-06", timeZone: tz))
+    }
+
+    /// Owner 2026-08-08: a shared chore is ONE river row — the engine's
+    /// per-assignee occurrences fold back together, like the Chores module.
+    @Test func sharedChoresAggregateIntoOneRiverRow() {
+        let tz = TimeZone(identifier: "UTC")!
+        func occurrence(_ id: String, owner: String, status: Chore.StatusPayload = .open) -> Chore {
+            Chore(
+                id: id, choreId: "shared", title: "Test", emoji: nil, notes: nil,
+                starValue: 1, upForGrabs: false, dueDate: "2026-08-08", dueMode: nil,
+                dueTime: "22:00", status: status, late: false,
+                assigneeMemberId: owner, claimedByMemberId: nil,
+                completedByMemberId: status == .completed ? owner : nil, completedAt: nil
+            )
+        }
+        let river = FamilyDayLogic.river(
+            events: [],
+            chores: [occurrence("t|a", owner: "a"), occurrence("t|b", owner: "b"), occurrence("t|c", owner: "c")],
+            selected: ["a", "b", "c"],
+            phase: .today, minute: "12:00", timeZone: tz
+        )
+        #expect(river.flowing.count == 1)
+        guard case .chores(let row) = river.flowing[0] else {
+            Issue.record("expected a chore row"); return
+        }
+        #expect(Set(row.owners) == ["a", "b", "c"])
+        #expect(!row.completed)
+
+        // Half-done stays ONE open row; it survives any owner's filter.
+        let half = FamilyDayLogic.river(
+            events: [],
+            chores: [occurrence("t|a", owner: "a", status: .completed), occurrence("t|b", owner: "b")],
+            selected: ["b"],
+            phase: .today, minute: "12:00", timeZone: tz
+        )
+        #expect(half.flowing.count == 1)
+        guard case .chores(let halfRow) = half.flowing[0] else {
+            Issue.record("expected a chore row"); return
+        }
+        #expect(!halfRow.completed)
     }
 
     @Test func allDayEventsNeverReadAsEnded() {

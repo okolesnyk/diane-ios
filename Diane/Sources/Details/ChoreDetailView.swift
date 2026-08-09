@@ -101,6 +101,10 @@ struct ChoreDetailView: View {
     @State private var alertMessage: String?
     @State private var editing = false
     @State private var closeOnAlertDismiss = false  // R11
+    /// The chore DEFINITION — the occurrence names one assignee, but a
+    /// shared chore has several and the detail must show them all (owner
+    /// 2026-08-08). listChores is any-session on the server.
+    @State private var definition: Components.Schemas.Chore?
 
     init(
         context: SignedInContext,
@@ -242,10 +246,20 @@ struct ChoreDetailView: View {
         }
     }
 
+    /// Every assignee: the definition's full list when we have it, else the
+    /// one this occurrence names.
+    private var assignees: [Components.Schemas.Member] {
+        let ids = definition.map(\.assigneeIds)
+            ?? occurrence.assigneeMemberId.map { [$0] } ?? []
+        return ids.compactMap { membersByID[$0] }
+    }
+
     private var peopleSection: some View {
         Section {
-            if let assignee = occurrence.assigneeMemberId.flatMap({ membersByID[$0] }) {
-                personRow("Assigned to", assignee)
+            if !assignees.isEmpty {
+                ForEach(assignees, id: \.id) { member in
+                    personRow("Assigned to", member)
+                }
             } else if occurrence.claimedByMemberId == nil {
                 Label("Up for grabs", systemImage: "hand.raised")
                     .foregroundStyle(.secondary)
@@ -286,6 +300,12 @@ struct ChoreDetailView: View {
     /// R11: the sheet can't act any more, so it refreshes instead — adopt the
     /// row the server has now, or say so when it left the board and close.
     private func refresh() async {
+        // The definition fills in the FULL assignee list; a failure just
+        // leaves the occurrence's single name standing.
+        if case .ok(let ok)? = try? await context.client.api.listChores(.init()),
+           let chores = try? ok.body.json.chores {
+            definition = chores.first { $0.id == occurrence.choreId }
+        }
         do {
             switch try await context.client.api.listChoreOccurrences(.init()) {
             case .ok(let ok):

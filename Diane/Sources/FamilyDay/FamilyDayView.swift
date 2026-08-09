@@ -19,11 +19,12 @@ struct FamilyDayView: View {
     @Environment(MemberFilterStore.self) private var filter
     @State private var activeSheet: MyDayView.ActiveSheet?
     @State private var confirmDismiss: MyDayLogic.Chore?
-    @State private var confirmUncheck: MyDayLogic.Chore?
+    @State private var confirmUncheck: ChoresPageLogic.Row?
     @State private var actionError: String?
     @State private var inFlight: Set<String> = []
     /// Member tint — the device-local display pref (owner rule 2026-08-05).
     @AppStorage("memberTint") private var tintOn = true
+    @Environment(\.colorScheme) private var colorScheme
 
     private let rowInsets = EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
 
@@ -106,7 +107,7 @@ struct FamilyDayView: View {
                 titleVisibility: .visible
             ) {
                 Button("Undo the check", role: .destructive) {
-                    if let chore = confirmUncheck { Task { await act("uncomplete", on: chore) } }
+                    if let row = confirmUncheck { Task { await act("uncomplete", on: row.lead) } }
                     confirmUncheck = nil
                 }
             }
@@ -120,13 +121,12 @@ struct FamilyDayView: View {
 
     private func open(_ route: DetailRoute) { path.append(route) }
 
-    /// Cross-member un-checks confirm and name the cost (owner-approved).
+    /// Cross-member un-checks confirm and name the cost (owner-approved) —
+    /// the Chores module's copy, so a shared row names everyone credited.
     private var uncheckPrompt: String {
-        guard let chore = confirmUncheck else { return "" }
-        let doer = members.first(where: { $0.id == chore.completedByMemberId })?.name ?? "their"
-        return chore.starValue > 0
-            ? "Undo \(doer)'s check? They lose \(chore.starValue) ★."
-            : "Undo \(doer)'s check?"
+        guard let row = confirmUncheck else { return "" }
+        return ChoresPageLogic.undoPrompt(row, names: memberNames)
+            + " " + ChoresPageLogic.undoDetail(row, names: memberNames)
     }
 
     // MARK: - Chips
@@ -143,7 +143,7 @@ struct FamilyDayView: View {
                         Circle()
                             .trim(from: 0, to: chip.progress)
                             .stroke(
-                                Color(hex: member.color) ?? .accentColor,
+                                Color(hex: member.color),
                                 style: StrokeStyle(lineWidth: 3, lineCap: .round)
                             )
                             .rotationEffect(.degrees(-90))
@@ -235,11 +235,11 @@ struct FamilyDayView: View {
             today: clock.today
         )
         let nowIndex = phase == .today
-            ? MyDayLogic.nowLineIndex(items: river.flowing, minute: clock.minute, timeZone: clock.timeZone)
+            ? FamilyDayLogic.nowIndex(items: river.flowing, minute: clock.minute, timeZone: clock.timeZone)
             : nil
 
-        let isEmpty = river.catchUp.isEmpty
-            && river.flowing.isEmpty && river.noSetTime.isEmpty && river.pool.isEmpty
+        let isEmpty = river.catchUp.isEmpty && river.flowing.isEmpty
+            && river.noSetTime.isEmpty && river.anytime.isEmpty && river.pool.isEmpty
 
         return List {
             DayModeNote(phase: phase)
@@ -253,8 +253,9 @@ struct FamilyDayView: View {
             }
             if !river.catchUp.isEmpty {
                 Section {
-                    // Catch up rows stay neutral — red is reserved for late.
-                    ForEach(river.catchUp, id: \.id) { chore in choreRow(chore, loaded: loaded, late: true, neutralTint: true) }
+                    // Washed like every owned row (owner 2026-08-08 — the
+                    // "Catch up stays neutral" rule made the pages disagree).
+                    ForEach(river.catchUp, id: \.id) { row in choreRow(row, loaded: loaded, late: true) }
                 } header: { header("Catch up").foregroundStyle(.red) }
             }
             // Nothing folds away (owner 2026-08-07): the whole day stands in
@@ -270,12 +271,18 @@ struct FamilyDayView: View {
             }
             if !river.noSetTime.isEmpty {
                 Section {
-                    ForEach(river.noSetTime, id: \.id) { chore in choreRow(chore, loaded: loaded, late: chore.late && chore.status == .open) }
+                    ForEach(river.noSetTime, id: \.id) { row in choreRow(row, loaded: loaded, late: row.late && !row.completed) }
                 } header: { header("No set time") }
+            }
+            // Undated apart from the day's clockless business (owner 2026-08-08).
+            if !river.anytime.isEmpty {
+                Section {
+                    ForEach(river.anytime, id: \.id) { row in choreRow(row, loaded: loaded, late: false) }
+                } header: { header("Anytime") }
             }
             if !river.pool.isEmpty {
                 Section {
-                    ForEach(river.pool, id: \.id) { chore in poolRow(chore) }
+                    ForEach(river.pool, id: \.id) { row in poolRow(row) }
                 } header: { header("Up for grabs") }
             }
             if phase != .past {
@@ -302,6 +309,7 @@ struct FamilyDayView: View {
             }
         }
         .listStyle(.plain)
+        .contentMargins(.top, 0, for: .scrollContent)
         .fontDesign(.rounded)
         .refreshable { await load() }
         // The hairline row must hug the seam: List reserves ~44pt per row
@@ -320,10 +328,10 @@ struct FamilyDayView: View {
     }
 
     @ViewBuilder
-    private func riverRow(_ item: MyDayLogic.TimelineItem, loaded: DayData) -> some View {
+    private func riverRow(_ item: FamilyDayLogic.RiverItem, loaded: DayData) -> some View {
         switch item {
         case .event(let event): eventRow(event, loaded: loaded)
-        case .chore(let chore): choreRow(chore, loaded: loaded, late: false)
+        case .chores(let row): choreRow(row, loaded: loaded, late: false)
         }
     }
 
@@ -340,7 +348,7 @@ struct FamilyDayView: View {
         return HStack(spacing: 10) {
             timeCol(event.allDay ? "all day" : event.startsAt.flatMap { TodayLogic.timeLabel($0, timeZone: clock.timeZone) } ?? "")
             RoundedRectangle(cornerRadius: 2)
-                .fill(Color(hex: MyDayLogic.railColorHex(for: event, calendars: loaded.calendars) ?? "#34c759") ?? .green)
+                .fill(Color(hex: MyDayLogic.railColorHex(for: event, calendars: loaded.calendars) ?? "#34c759"))
                 .frame(width: 4)
                 .frame(minHeight: 30)
             DetailRow(route: .event(event), open: open) {
@@ -365,27 +373,40 @@ struct FamilyDayView: View {
     }
 
     private func choreRow(
-        _ chore: MyDayLogic.Chore,
+        _ row: ChoresPageLogic.Row,
         loaded: DayData,
-        late: Bool,
-        neutralTint: Bool = false
+        late: Bool
     ) -> some View {
-        let owners = FamilyDayLogic.owners(of: chore)
-        return HStack(spacing: 10) {
-            if late { timeCol("late", red: true) } else if let time = chore.dueTime { timeCol(time) }
-            circleButton(chore, late: late)
-            DetailRow(route: .chore(chore), open: open) {
+        HStack(spacing: 10) {
+            if late {
+                timeCol("late", red: true)
+            } else if let time = row.dueTime {
+                Text(time)
+                    .font(.caption.weight(.medium))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 48, alignment: .trailing)
+                    .overlay(alignment: .leading) {
+                        Image(systemName: row.dueMode == .by ? "hourglass" : "clock")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
+            }
+            circleButton(row, late: late)
+            DetailRow(route: .chore(row.lead), open: open) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
-                            if let emoji = chore.emoji { Text(emoji) }
+                            if let emoji = row.emoji { Text(emoji) }
                             // Done = crossed AND greyed (owner 2026-08-07),
                             // so finished work stops shouting.
-                            Text(chore.title)
-                                .strikethrough(chore.status == .completed, color: .secondary)
-                                .foregroundStyle(chore.status == .completed ? Color.secondary : Color.primary)
+                            Text(row.title)
+                                .strikethrough(row.completed, color: .secondary)
+                                .foregroundStyle(row.completed ? Color.secondary : Color.primary)
                         }
-                        if let note = TodayLogic.completedByNote(chore, names: memberNames) {
+                        if let note = ChoresPageLogic.subtitle(row, today: clock.today, names: memberNames),
+                           row.completed {
                             Text(note).font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -393,42 +414,42 @@ struct FamilyDayView: View {
                 }
                 .contentShape(Rectangle())
             }
-            whoBadge(owners: owners)
-            if chore.starValue > 0 {
-                Text("★ \(chore.starValue)").font(.caption.weight(.semibold)).foregroundStyle(.orange)
+            whoBadge(owners: row.owners)
+            if row.starValue > 0 {
+                Text("★ \(row.starValue)").font(.caption.weight(.semibold)).foregroundStyle(.orange)
             }
         }
         // Done = the whole row goes gray — circle, avatar, star, wash
         // (owner 2026-08-08).
-        .grayscale(chore.status == .completed ? 1 : 0)
-        .opacity(chore.status == .completed ? 0.6 : 1)
+        .grayscale(row.completed ? 1 : 0)
+        .opacity(row.completed ? 0.6 : 1)
         .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
         .listRowInsets(rowInsets)
         .listRowBackground(
-            Group { if !neutralTint { tintBackground(owners: owners) } }
-                .grayscale(chore.status == .completed ? 1 : 0)
+            tintBackground(owners: row.owners)
+                .grayscale(row.completed ? 1 : 0)
         )
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if chore.status == .open && phase != .past {
-                Button("Dismiss") { confirmDismiss = chore }.tint(.orange)
+            if !row.completed && phase != .past {
+                Button("Dismiss") { confirmDismiss = row.lead }.tint(.orange)
             }
         }
     }
 
-    private func poolRow(_ chore: MyDayLogic.Chore) -> some View {
+    private func poolRow(_ row: ChoresPageLogic.Row) -> some View {
         HStack(spacing: 10) {
             Circle()
                 .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                 .foregroundStyle(.tertiary)
                 .frame(width: 26, height: 26)
                 .accessibilityHidden(true)
-            circleButton(chore, late: false)
-            DetailRow(route: .chore(chore), open: open) {
+            circleButton(row, late: false)
+            DetailRow(route: .chore(row.lead), open: open) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
-                            if let emoji = chore.emoji { Text(emoji) }
-                            Text(chore.title)
+                            if let emoji = row.emoji { Text(emoji) }
+                            Text(row.title)
                         }
                         Text("Anyone can take it").font(.caption).foregroundStyle(.secondary)
                     }
@@ -436,45 +457,46 @@ struct FamilyDayView: View {
                 }
                 .contentShape(Rectangle())
             }
-            if chore.starValue > 0 {
-                Text("★ \(chore.starValue)").font(.subheadline.weight(.bold)).foregroundStyle(.orange)
+            if row.starValue > 0 {
+                Text("★ \(row.starValue)").font(.subheadline.weight(.bold)).foregroundStyle(.orange)
             }
         }
         .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
         .listRowInsets(rowInsets)
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if phase == .today {
-                Button("Claim") { Task { await act("claim", on: chore) } }.tint(.blue)
+                Button("Claim") { Task { await act("claim", on: row.lead) } }.tint(.blue)
             }
         }
     }
 
-    private func circleButton(_ chore: MyDayLogic.Chore, late: Bool) -> some View {
+    private func circleButton(_ row: ChoresPageLogic.Row, late: Bool) -> some View {
         Button {
-            if chore.status == .completed {
-                // Your own check reverts instantly; someone else's confirms.
-                if chore.completedByMemberId == context.session.memberID {
-                    Task { await act("uncomplete", on: chore) }
+            if row.completed {
+                // Your own check reverts instantly; someone else's confirms
+                // (a shared row counts as someone else's if ANY of them is).
+                if ChoresPageLogic.needsUndoConfirm(row, me: context.session.memberID) {
+                    confirmUncheck = row
                 } else {
-                    confirmUncheck = chore
+                    Task { await act("uncomplete", on: row.lead) }
                 }
             } else {
-                Task { await act("complete", on: chore) }
+                Task { await act("complete", on: row.lead) }
             }
         } label: {
-            if inFlight.contains(chore.id) {
+            if inFlight.contains(row.lead.id) {
                 ProgressView().frame(width: 44, height: 44)
             } else {
-                Image(systemName: chore.status == .completed ? "checkmark.circle.fill" : "circle")
+                Image(systemName: row.completed ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 26))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(chore.status == .completed ? .green : late ? .red : .secondary)
+                    .foregroundStyle(row.completed ? .green : late ? .red : .secondary)
                     .frame(width: 44, height: 44)
             }
         }
         .buttonStyle(.plain)
         .disabled(phase == .past)
-        .accessibilityLabel(chore.status == .completed ? "Completed" : "Not completed")
+        .accessibilityLabel(row.completed ? "Completed" : "Not completed")
     }
 
     private func timeCol(_ text: String, red: Bool = false) -> some View {
@@ -508,7 +530,7 @@ struct FamilyDayView: View {
         if tintOn, !owners.isEmpty {
             let colors = FamilyDayLogic.tintColors(forOwners: owners, members: members)
                 .compactMap { Color(hex: $0) }
-            if let style = bandedTint(colors) {
+            if let style = bandedTint(colors, opacity: washOpacity(colorScheme)) {
                 Rectangle().fill(style)
             }
         }

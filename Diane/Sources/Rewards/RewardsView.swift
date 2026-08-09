@@ -194,6 +194,7 @@ struct RewardsView: View {
             }
         }
         .listStyle(.plain)
+        .contentMargins(.top, 0, for: .scrollContent)
     }
 
     // MARK: Sections

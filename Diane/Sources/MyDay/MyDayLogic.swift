@@ -210,22 +210,60 @@ enum MyDayLogic {
         var catchUp: [Chore] = []
         /// Timed chores, merged into the event timeline.
         var timed: [Chore] = []
-        /// Dated-but-untimed for the day, plus (today) anytime/byDate rows.
+        /// DATED but untimed — this day's business, just clockless.
         var noSetTime: [Chore] = []
+        /// Undated — never late, always available (owner 2026-08-08: mixing
+        /// these under "No set time" read as one confusing pile).
+        var anytime: [Chore] = []
     }
 
-    static func sections(_ occurrences: [Chore], me: String, phase: DayPhase) -> Sections {
+    /// Minutes past a timed chore's at/due time before it reads late on its
+    /// own day — the SERVER owns this rule (packages/chores LATE_GRACE_MINUTES);
+    /// this display twin moves rows at the right minute between refetches.
+    static let lateGraceMinutes = 15
+
+    static func effectivelyLate(_ chore: Chore, today: String, minute: String) -> Bool {
+        guard chore.status == .open else { return false }
+        if chore.late { return true }
+        guard chore.dueDate == today,
+              let time = chore.dueTime, let due = TodayLogic.minutes(time),
+              let now = TodayLogic.minutes(minute)
+        else { return false }
+        return now >= due + lateGraceMinutes
+    }
+
+    static func sections(
+        _ occurrences: [Chore],
+        me: String,
+        phase: DayPhase,
+        today: String = "",
+        minute: String = ""
+    ) -> Sections {
         var out = Sections()
         for chore in occurrences where isMine(chore, me: me) {
-            if phase == .today && chore.late && chore.status == .open {
+            if phase == .today && effectivelyLate(chore, today: today, minute: minute) {
                 out.catchUp.append(chore)
             } else if chore.dueTime != nil {
                 out.timed.append(chore)
-            } else {
+            } else if chore.dueDate != nil {
                 out.noSetTime.append(chore)
+            } else {
+                out.anytime.append(chore)
             }
         }
         return out
+    }
+
+    /// Every owner of a chore's (choreId, dueDate) sibling group — the
+    /// engine emits one occurrence per assignee, and a shared chore must
+    /// wear ALL its members even on pages that show just one occurrence
+    /// (owner 2026-08-08).
+    static func sharedOwners(of chore: Chore, in all: [Chore]) -> [String] {
+        let owners = all
+            .filter { $0.choreId == chore.choreId && $0.dueDate == chore.dueDate }
+            .sorted { $0.id < $1.id }
+            .compactMap { $0.claimedByMemberId ?? $0.assigneeMemberId }
+        return owners.isEmpty ? FamilyDayLogic.owners(of: chore) : owners
     }
 
     // MARK: - The merged timeline
@@ -256,6 +294,7 @@ enum MyDayLogic {
                 return minutes
             }
         }
+
     }
 
     /// Events + TIMED chores, one time-ordered river ("a chore due at 18:00

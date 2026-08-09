@@ -310,6 +310,7 @@ struct RoutinesView: View {
             }
         }
         .listStyle(.plain)
+        .contentMargins(.top, 0, for: .scrollContent)
     }
 
     // MARK: Data
@@ -689,6 +690,7 @@ private struct ManageRoutinesView: View {
                         .listRowInsets(RoutinesBoardLogic.rowInsets)
                 }
                 .listStyle(.plain)
+        .contentMargins(.top, 0, for: .scrollContent)
             }
         }
     }

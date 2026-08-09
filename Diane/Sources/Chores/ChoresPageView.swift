@@ -28,6 +28,7 @@ struct ChoresPageView: View {
 
     /// Member tint — the same device-local switch Family Day and My Day read.
     @AppStorage("memberTint") private var tintOn = true
+    @Environment(\.colorScheme) private var colorScheme
 
     private let rowInsets = EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
 
@@ -164,7 +165,7 @@ struct ChoresPageView: View {
                 Circle()
                     .trim(from: 0, to: chip.progress)
                     .stroke(
-                        Color(hex: member.color) ?? .accentColor,
+                        Color(hex: member.color),
                         style: StrokeStyle(lineWidth: 3, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
@@ -255,7 +256,8 @@ struct ChoresPageView: View {
             actionable: loaded.actionable,
             window: loaded.window,
             today: clock.today,
-            effective: effective
+            effective: effective,
+            minute: clock.minute
         )
         return List {
             if sections.isEmpty {
@@ -281,6 +283,7 @@ struct ChoresPageView: View {
             // speaks for itself.
         }
         .listStyle(.plain)
+        .contentMargins(.top, 0, for: .scrollContent)
         .fontDesign(.rounded)
         .refreshable { await load() }
     }
@@ -383,7 +386,7 @@ struct ChoresPageView: View {
     private func tintWash(owners: [String]) -> some View {
         if tintOn, !owners.isEmpty {
             let colors = owners.compactMap { memberLookup[$0]?.color }.compactMap { Color(hex: $0) }
-            if let style = bandedTint(colors) {
+            if let style = bandedTint(colors, opacity: washOpacity(colorScheme)) {
                 Rectangle().fill(style)
             }
         }

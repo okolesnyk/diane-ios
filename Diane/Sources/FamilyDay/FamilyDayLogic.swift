@@ -65,22 +65,53 @@ enum FamilyDayLogic {
 
     // MARK: - The river partition
 
+    /// A river entry: an event, or ONE row per shared chore. The engine
+    /// emits an occurrence per assignee; the family page folds them back
+    /// together exactly like the Chores module (owner 2026-08-08 — a shared
+    /// chore was showing once per member).
+    enum RiverItem: Equatable, Identifiable {
+        case event(Event)
+        case chores(ChoresPageLogic.Row)
+
+        var id: String {
+            switch self {
+            case .event(let event): "ev-\(event.id)"
+            case .chores(let row): "ch-\(row.id)"
+            }
+        }
+
+        func sortKey(timeZone: TimeZone) -> Int {
+            switch self {
+            case .event(let event): MyDayLogic.TimelineItem.event(event).sortKey(timeZone: timeZone)
+            case .chores(let row): MyDayLogic.TimelineItem.chore(row.lead).sortKey(timeZone: timeZone)
+            }
+        }
+
+    }
+
     struct River: Equatable {
-        /// Selected members' late chores (today only) — My Day's pattern.
-        var catchUp: [Chore] = []
+        /// Selected members' late rows (today only) — My Day's pattern.
+        var catchUp: [ChoresPageLogic.Row] = []
         /// The whole timed day, time-ordered: events (ended ones grey in
-        /// place, they never hide — owner 2026-08-07) + timed chores
+        /// place, they never hide — owner 2026-08-07) + timed chore rows
         /// (completed ones crossed and grey in place).
-        var flowing: [MyDayLogic.TimelineItem] = []
-        /// Untimed chores for the day, done ones crossed in place.
-        var noSetTime: [Chore] = []
+        var flowing: [RiverItem] = []
+        /// DATED but untimed rows — the day's clockless business.
+        var noSetTime: [ChoresPageLogic.Row] = []
+        /// Undated rows — never late, always available (owner 2026-08-08).
+        var anytime: [ChoresPageLogic.Row] = []
         /// Unclaimed up-for-grabs — everyone's business, immune to the filter.
-        var pool: [Chore] = []
+        var pool: [ChoresPageLogic.Row] = []
+    }
+
+    static func visible(_ row: ChoresPageLogic.Row, selected: Set<String>) -> Bool {
+        row.owners.isEmpty || row.owners.contains { selected.contains($0) }
     }
 
     /// Split the family's day. Nothing folds away any more (owner
     /// 2026-08-07): finished things grey out where they stand — the view
-    /// asks `hasEnded` per event.
+    /// asks `hasEnded` per event. Shared chores arrive per-assignee and
+    /// leave as one row each.
     static func river(
         events: [Event],
         chores: [Chore],
@@ -92,19 +123,23 @@ enum FamilyDayLogic {
     ) -> River {
         var out = River()
 
-        for chore in chores {
-            let owner = chore.claimedByMemberId ?? chore.assigneeMemberId
-            if owner == nil && chore.status == .open && chore.claimedByMemberId == nil {
-                out.pool.append(chore)
+        for row in ChoresPageLogic.rows(chores) {
+            if row.isPool && row.lead.status == .open {
+                out.pool.append(row)
                 continue
             }
-            guard visible(chore, selected: selected) else { continue }
-            if phase == .today && chore.late && chore.status == .open {
-                out.catchUp.append(chore)
-            } else if chore.dueTime != nil {
-                out.flowing.append(.chore(chore))
+            guard visible(row, selected: selected) else { continue }
+            let rowLate = row.occurrences.contains {
+                MyDayLogic.effectivelyLate($0, today: today ?? "", minute: minute)
+            }
+            if phase == .today && rowLate && !row.completed {
+                out.catchUp.append(row)
+            } else if row.dueTime != nil {
+                out.flowing.append(.chores(row))
+            } else if row.dueDate != nil {
+                out.noSetTime.append(row)
             } else {
-                out.noSetTime.append(chore)
+                out.anytime.append(row)
             }
         }
 
@@ -112,8 +147,21 @@ enum FamilyDayLogic {
             out.flowing.append(.event(event))
         }
 
-        out.flowing.sort { $0.sortKey(timeZone: timeZone) < $1.sortKey(timeZone: timeZone) }
+        out.flowing.sort {
+            let l = $0.sortKey(timeZone: timeZone)
+            let r = $1.sortKey(timeZone: timeZone)
+            return l == r ? $0.id < $1.id : l < r
+        }
         return out
+    }
+
+    /// Where the hairline sits among river items (mirrors My Day's rule).
+    static func nowIndex(items: [RiverItem], minute: String, timeZone: TimeZone) -> Int? {
+        guard let now = TodayLogic.minutes(minute) else { return nil }
+        for (index, item) in items.enumerated() where item.sortKey(timeZone: timeZone) > now {
+            return index
+        }
+        return items.count
     }
 
     /// Has a timed event fully ended by `minute` on `day`? Drives the grey

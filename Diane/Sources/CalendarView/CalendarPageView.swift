@@ -33,6 +33,7 @@ struct CalendarPageView: View {
     @Environment(MemberFilterStore.self) private var filter
     /// Member tint — the device-local display pref.
     @AppStorage("memberTint") private var tintOn = true
+    @Environment(\.colorScheme) private var colorScheme
     /// The month-title long-jump picker (mock: year ‹ › row + month grid).
     @State private var showJumpPicker = false
     @State private var pickerYear = 2026
@@ -190,7 +191,7 @@ struct CalendarPageView: View {
                         Circle()
                             .trim(from: 0, to: chip.progress)
                             .stroke(
-                                Color(hex: member.color) ?? .accentColor,
+                                Color(hex: member.color),
                                 style: StrokeStyle(lineWidth: 3, lineCap: .round)
                             )
                             .rotationEffect(.degrees(-90))
@@ -381,6 +382,7 @@ struct CalendarPageView: View {
                     }
                 }
                 .listStyle(.plain)
+        .contentMargins(.top, 0, for: .scrollContent)
                 .fontDesign(.rounded)
                 .refreshable { await load() }
                 .onChange(of: day) { _, newDay in
@@ -396,7 +398,7 @@ struct CalendarPageView: View {
         if tintOn, let ids = event.memberIds, !ids.isEmpty {
             let colors = ids.compactMap { id in members.first(where: { $0.id == id })?.color }
                 .compactMap { Color(hex: $0) }
-            if let style = bandedTint(colors) {
+            if let style = bandedTint(colors, opacity: washOpacity(colorScheme)) {
                 Rectangle().fill(style)
             }
         }
@@ -426,7 +428,7 @@ struct CalendarPageView: View {
     }
 
     private func railColor(_ event: Components.Schemas.EventOccurrence, loaded: PageData) -> Color {
-        Color(hex: MyDayLogic.railColorHex(for: event, calendars: loaded.calendars) ?? "#34c759") ?? .green
+        Color(hex: MyDayLogic.railColorHex(for: event, calendars: loaded.calendars) ?? "#34c759")
     }
 
     @ViewBuilder
@@ -652,7 +654,7 @@ struct CalendarPageView: View {
         let colors = owners.compactMap { id in
             loaded.members.first(where: { $0.id == id })?.color
         }.compactMap { Color(hex: $0) }
-        if let style = bandedTint(colors) { return style }
+        if let style = bandedTint(colors, opacity: washOpacity(colorScheme)) { return style }
         return AnyShapeStyle(Color.secondary.opacity(0.12))
     }
 
@@ -729,6 +731,10 @@ private struct HoldToDraftOverlay: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
 
+    /// UIKit delivers recognizer callbacks on the main thread; saying so
+    /// silences the isolation warnings and makes the closures' MainActor
+    /// hops explicit.
+    @MainActor
     final class Coordinator: NSObject {
         var parent: HoldToDraftOverlay
         init(parent: HoldToDraftOverlay) { self.parent = parent }

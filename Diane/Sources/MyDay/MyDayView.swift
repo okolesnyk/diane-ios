@@ -24,6 +24,7 @@ struct MyDayView: View {
 
     /// Member tint — the same device-local switch Family Day reads.
     @AppStorage("memberTint") private var tintOn = true
+    @Environment(\.colorScheme) private var colorScheme
 
     private let rowInsets = EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
 
@@ -166,7 +167,7 @@ struct MyDayView: View {
         let dayChores = phase == .today
             ? loaded.actionableChores
             : loaded.windowChores.filter { $0.dueDate == day }
-        let sections = MyDayLogic.sections(dayChores, me: me, phase: phase)
+        let sections = MyDayLogic.sections(dayChores, me: me, phase: phase, today: clock.today, minute: clock.minute)
         let timeline = MyDayLogic.timeline(
             events: TodayLogic.sortedEvents(dayEvents),
             timedChores: sections.timed,
@@ -178,7 +179,7 @@ struct MyDayView: View {
         let myRoutines = loaded.board.filter { $0.memberId == me }
 
         let isEmpty = sections.catchUp.isEmpty && timeline.isEmpty
-            && sections.noSetTime.isEmpty && myRoutines.isEmpty
+            && sections.noSetTime.isEmpty && sections.anytime.isEmpty && myRoutines.isEmpty
 
         return List {
             DayModeNote(phase: phase)
@@ -223,6 +224,15 @@ struct MyDayView: View {
                     sectionHeader("No set time")
                 }
             }
+            // Undated lives apart from the day's clockless business (owner
+            // 2026-08-08: one mixed pile read as confusing).
+            if !sections.anytime.isEmpty {
+                Section {
+                    ForEach(sections.anytime, id: \.id) { chore in choreRow(chore, late: chore.late) }
+                } header: {
+                    sectionHeader("Anytime")
+                }
+            }
             if !myRoutines.isEmpty {
                 Section {
                     ForEach(myRoutines, id: \.routineId) { entry in routineCard(entry) }
@@ -255,6 +265,7 @@ struct MyDayView: View {
             }
         }
         .listStyle(.plain)
+        .contentMargins(.top, 0, for: .scrollContent)
         .fontDesign(.rounded)
         .refreshable { await load() }
         // The hairline row must hug the seam: List reserves ~44pt per row
@@ -317,7 +328,7 @@ struct MyDayView: View {
             }
             .frame(width: 48, alignment: .trailing)
             RoundedRectangle(cornerRadius: 2)
-                .fill(Color(hex: MyDayLogic.railColorHex(for: event, calendars: calendars) ?? "#34c759") ?? .green)
+                .fill(Color(hex: MyDayLogic.railColorHex(for: event, calendars: calendars) ?? "#34c759"))
                 .frame(width: 4)
                 .frame(minHeight: 30)
             DetailRow(route: .event(event), open: open) {
@@ -367,6 +378,33 @@ struct MyDayView: View {
         }
     }
 
+    /// A shared chore wears ALL its members, not just this occurrence's
+    /// (owner 2026-08-08) — siblings come from the same fetched set.
+    private func sharedOwners(_ chore: MyDayLogic.Chore) -> [String] {
+        let all = phase == .today
+            ? (data.value?.actionableChores ?? [])
+            : (data.value?.windowChores ?? [])
+        return MyDayLogic.sharedOwners(of: chore, in: all)
+    }
+
+    /// "⏱ 22:00" — a tiny glyph says whether the time is do-AT (clock) or
+    /// due-BY (hourglass), owner 2026-08-08.
+    private func choreTimeCol(_ chore: MyDayLogic.Chore) -> some View {
+        // The glyph rides the column's left edge — widening the 48pt
+        // column would break row alignment, squeezing it wrapped the time.
+        Text(chore.dueTime ?? "")
+            .font(.caption.weight(.medium))
+            .monospacedDigit()
+            .lineLimit(1)
+            .foregroundStyle(.secondary)
+            .frame(width: 48, alignment: .trailing)
+            .overlay(alignment: .leading) {
+                Image(systemName: chore.dueMode == .by ? "hourglass" : "clock")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
+    }
+
     private var memberLookup: [String: Components.Schemas.Member] {
         Dictionary(uniqueKeysWithValues: (data.value?.members ?? []).map { ($0.id, $0) })
     }
@@ -375,7 +413,7 @@ struct MyDayView: View {
     private func tintWash(owners: [String]) -> some View {
         if tintOn, !owners.isEmpty {
             let colors = owners.compactMap { memberLookup[$0]?.color }.compactMap { Color(hex: $0) }
-            if let style = bandedTint(colors) {
+            if let style = bandedTint(colors, opacity: washOpacity(colorScheme)) {
                 Rectangle().fill(style)
             }
         }
@@ -383,8 +421,10 @@ struct MyDayView: View {
 
     private func choreRow(_ chore: MyDayLogic.Chore, late: Bool) -> some View {
         HStack(spacing: 10) {
-            if chore.dueTime != nil || late {
-                timeColumn(late ? nil : chore.dueTime, allDay: false, lateBadge: late)
+            if late {
+                timeColumn(nil, allDay: false, lateBadge: true)
+            } else if chore.dueTime != nil {
+                choreTimeCol(chore)
             }
             CheckCircle(
                 completed: chore.status == .completed,
@@ -415,7 +455,7 @@ struct MyDayView: View {
                 }
                 .contentShape(Rectangle())
             }
-            whoBadge(owners: FamilyDayLogic.owners(of: chore))
+            whoBadge(owners: sharedOwners(chore))
             if chore.starValue > 0 {
                 Text("★ \(chore.starValue)")
                     .font(.caption.weight(.semibold))
@@ -429,7 +469,7 @@ struct MyDayView: View {
         .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
         .listRowInsets(rowInsets)
         .listRowBackground(
-            tintWash(owners: FamilyDayLogic.owners(of: chore))
+            tintWash(owners: sharedOwners(chore))
                 .grayscale(chore.status == .completed ? 1 : 0)
         )
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {

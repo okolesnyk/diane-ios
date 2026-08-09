@@ -176,6 +176,7 @@ struct ChoreHistoryView: View {
             }
         }
         .listStyle(.plain)
+        .contentMargins(.top, 0, for: .scrollContent)
         .fontDesign(.rounded)
         .refreshable { await load() }
     }

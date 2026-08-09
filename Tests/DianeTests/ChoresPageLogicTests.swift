@@ -236,6 +236,23 @@ struct ChoresPageLogicTests {
         #expect(out[0].showsAddRow)
     }
 
+    /// Owner 2026-08-08: >15 min past a same-day at/due time = Catch up,
+    /// and today's group must not show the twin.
+    @Test func timeLateRowsMoveToCatchUpOnly() {
+        let timed = occ(id: "t", choreId: "t", dueDate: today, dueTime: "22:00", assignee: sib)
+        let out = ChoresPageLogic.sections(
+            tab: .all, actionable: [timed], window: [timed],
+            today: today, effective: everyone, minute: "22:20"
+        )
+        #expect(out.map(\.kind) == [.catchUp])
+        // Inside the grace it stays a normal Today row.
+        let calm = ChoresPageLogic.sections(
+            tab: .all, actionable: [timed], window: [timed],
+            today: today, effective: everyone, minute: "22:10"
+        )
+        #expect(calm.map(\.kind) == [.day])
+    }
+
     // MARK: Filter
 
     @Test func soloingAMemberKeepsThePoolVisible() {

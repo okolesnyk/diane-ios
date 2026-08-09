@@ -138,12 +138,22 @@ enum ChoresPageLogic {
         var showsAddRow: Bool { kind != .catchUp }
     }
 
+    /// The graced rule, row-level: late server-side OR >15 min past a
+    /// same-day at/due time (the display twin of the server's constant).
+    static func effectivelyLate(_ row: Row, today: String, minute: String?) -> Bool {
+        guard let minute else { return row.late }
+        return row.late || row.occurrences.contains {
+            MyDayLogic.effectivelyLate($0, today: today, minute: minute)
+        }
+    }
+
     static func sections(
         tab: Tab,
         actionable: [Occurrence],
         window: [Occurrence],
         today: String,
-        effective: Set<String>
+        effective: Set<String>,
+        minute: String? = nil
     ) -> [Section] {
         let weekEnd = MyDayLogic.addDays(today, weekSpanDays)
         let live = rows(actionable).filter { isVisible($0, effective: effective) }
@@ -154,7 +164,9 @@ enum ChoresPageLogic {
         // Catch up — every late chore, pulled out of its day group (My Day's
         // pattern; the owner asked for it on All as well as Scheduled).
         if tab != .anytime {
-            let late = live.filter { $0.late && !$0.completed }.sorted(by: order)
+            let late = live
+                .filter { effectivelyLate($0, today: today, minute: minute) && !$0.completed }
+                .sorted(by: order)
             if !late.isEmpty {
                 out.append(.init(
                     id: "catchup", title: "Catch up", kind: .catchUp,
@@ -177,8 +189,12 @@ enum ChoresPageLogic {
 
         guard tab != .anytime else { return out }
 
-        // Today through the week, empty days skipped.
-        let byDate = Dictionary(grouping: dated.filter { $0.dueDate != nil }) { $0.dueDate! }
+        // Today through the week, empty days skipped. A row that went late
+        // lives in Catch up ONLY — today's group must not show its twin.
+        let grouped = dated.filter {
+            $0.dueDate != nil && !(effectivelyLate($0, today: today, minute: minute) && !$0.completed)
+        }
+        let byDate = Dictionary(grouping: grouped) { $0.dueDate! }
         for offset in 0...weekSpanDays {
             let date = MyDayLogic.addDays(today, offset)
             guard let dayRows = byDate[date], !dayRows.isEmpty else { continue }
