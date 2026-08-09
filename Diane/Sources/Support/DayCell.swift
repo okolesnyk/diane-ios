@@ -85,11 +85,16 @@ struct DayStrip: View {
         .padding(.bottom, 6)
         .contentShape(Rectangle())
         // Swipe the STRIP (not the page — rows own their swipes) to page
-        // weeks; the same weekday stays selected.
+        // weeks. You land on the day nearest to where you came from: the
+        // next week's FIRST day, the previous week's LAST (owner 2026-08-08
+        // — supersedes "the same weekday stays selected").
         .gesture(
             DragGesture(minimumDistance: 30).onEnded { value in
                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                onSelect(MyDayLogic.addDays(day, value.translation.width < 0 ? 7 : -7))
+                onSelect(MyDayLogic.pagedStripTarget(
+                    from: day,
+                    forward: value.translation.width < 0
+                ))
             }
         )
     }

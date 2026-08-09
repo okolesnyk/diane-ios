@@ -68,19 +68,19 @@ enum FamilyDayLogic {
     struct River: Equatable {
         /// Selected members' late chores (today only) — My Day's pattern.
         var catchUp: [Chore] = []
-        /// Finished business that folds away: completed chores + past events.
-        var folded: [MyDayLogic.TimelineItem] = []
-        /// The live stream: upcoming events + open timed chores, time-ordered.
+        /// The whole timed day, time-ordered: events (ended ones grey in
+        /// place, they never hide — owner 2026-08-07) + timed chores
+        /// (completed ones crossed and grey in place).
         var flowing: [MyDayLogic.TimelineItem] = []
-        /// Open untimed chores for the day (all selected members').
+        /// Untimed chores for the day, done ones crossed in place.
         var noSetTime: [Chore] = []
         /// Unclaimed up-for-grabs — everyone's business, immune to the filter.
         var pool: [Chore] = []
     }
 
-    /// Split the family's day. `minute` is the household clock ("HH:mm");
-    /// off-today the fold takes completed chores only (events just render in
-    /// place — the past day IS the record, the future has nothing to fold).
+    /// Split the family's day. Nothing folds away any more (owner
+    /// 2026-08-07): finished things grey out where they stand — the view
+    /// asks `hasEnded` per event.
     static func river(
         events: [Event],
         chores: [Chore],
@@ -91,7 +91,6 @@ enum FamilyDayLogic {
         today: String? = nil
     ) -> River {
         var out = River()
-        let now = TodayLogic.minutes(minute) ?? 0
 
         for chore in chores {
             let owner = chore.claimedByMemberId ?? chore.assigneeMemberId
@@ -102,8 +101,6 @@ enum FamilyDayLogic {
             guard visible(chore, selected: selected) else { continue }
             if phase == .today && chore.late && chore.status == .open {
                 out.catchUp.append(chore)
-            } else if chore.status == .completed {
-                out.folded.append(.chore(chore))
             } else if chore.dueTime != nil {
                 out.flowing.append(.chore(chore))
             } else {
@@ -112,34 +109,17 @@ enum FamilyDayLogic {
         }
 
         for event in events where visible(event, selected: selected) {
-            let item = MyDayLogic.TimelineItem.event(event)
-            // Today: an event folds only 15 min after it ENDED — an ongoing
-            // event never hides (owner rule 2026-08-06). All-day never folds.
-            if phase == .today && foldsAway(event, minute: now, day: today ?? "", timeZone: timeZone) {
-                out.folded.append(item)
-            } else {
-                out.flowing.append(item)
-            }
+            out.flowing.append(.event(event))
         }
 
-        out.folded.sort { $0.sortKey(timeZone: timeZone) < $1.sortKey(timeZone: timeZone) }
         out.flowing.sort { $0.sortKey(timeZone: timeZone) < $1.sortKey(timeZone: timeZone) }
         return out
     }
 
-    static func foldLabel(_ folded: [MyDayLogic.TimelineItem]) -> String {
-        "Complete / Past events — \(folded.count) done"
-    }
-
-    /// Minutes of grace after an event ENDS before it folds away (owner rule
-    /// 2026-08-06: never hide an ongoing event; hide it 15 min after it
-    /// finished).
-    static let foldGraceMinutes = 15
-
-    /// Does a timed event fold into "Earlier" at `minute` on `day`? Only
-    /// once its END (not start) is `foldGraceMinutes` behind the clock;
-    /// missing end reads as an instant event ending at its start.
-    static func foldsAway(_ event: Event, minute: Int, day: String, timeZone: TimeZone) -> Bool {
+    /// Has a timed event fully ended by `minute` on `day`? Drives the grey
+    /// (never hides). All-day events don't end mid-day; a missing end reads
+    /// as an instant event ending at its start.
+    static func hasEnded(_ event: Event, minute: Int, day: String, timeZone: TimeZone) -> Bool {
         guard !event.allDay else { return false }
         guard let endInstant = event.endsAt ?? event.startsAt,
               let end = TodayLogic.parseInstant(endInstant)
@@ -147,7 +127,7 @@ enum FamilyDayLogic {
         let endDay = TodayLogic.dateString(for: end, timeZone: timeZone)
         if endDay > day { return false } // still running into a later day
         if endDay < day { return true }
-        return TodayLogic.clockMinutes(of: end, timeZone: timeZone) + foldGraceMinutes <= minute
+        return TodayLogic.clockMinutes(of: end, timeZone: timeZone) <= minute
     }
 
     // MARK: - Member tint (device-local setting; wash rows in owner colors)

@@ -82,18 +82,20 @@ import DianeKit
         #expect(dot.durationMinutes == 30)
     }
 
-    @Test func gridWindowIsTheWakingDayWidenedByRealEvents() {
-        // Empty day: the mock's 07:00–22:00.
-        let empty = CalendarPageLogic.gridWindow(blocks: [])
-        #expect(empty.start == 7 && empty.end == 22)
-        // An early and a late event stretch it, nothing else does.
-        let early = logic().dayBlocks(day: "2026-08-06", events: [
+    @Test func fullDayGridOpensAtTheUsefulHour() {
+        // All 24 hours exist (owner 2026-08-07); this decides where the
+        // scroll LANDS. Today: a little above now.
+        #expect(CalendarPageLogic.initialScrollHour(blocks: [], isToday: true, nowMinutes: 14 * 60 + 30) == 12)
+        // Early morning clamps to midnight, never negative.
+        #expect(CalendarPageLogic.initialScrollHour(blocks: [], isToday: true, nowMinutes: 40) == 0)
+        // Another day: an hour above its first event.
+        let blocks = logic().dayBlocks(day: "2026-08-06", events: [
             event(id: "dawn", start: "2026-08-06T05:15", end: "2026-08-06T06:00"),
             event(id: "late", start: "2026-08-06T22:30", end: "2026-08-06T23:15"),
         ])
-        let stretched = CalendarPageLogic.gridWindow(blocks: early)
-        #expect(stretched.start == 5)
-        #expect(stretched.end == 24)
+        #expect(CalendarPageLogic.initialScrollHour(blocks: blocks, isToday: false, nowMinutes: nil) == 4)
+        // No events at all: the waking morning.
+        #expect(CalendarPageLogic.initialScrollHour(blocks: [], isToday: false, nowMinutes: nil) == 7)
     }
 
     @Test func slotSnappingClampsAndRounds() {

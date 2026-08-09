@@ -94,6 +94,20 @@ enum MyDayLogic {
         return symbols[(weekday - 1) % symbols.count]
     }
 
+    /// Where a strip swipe lands (owner 2026-08-08): the day nearest to
+    /// where you came from — forward = the NEXT week's first day, back =
+    /// the PREVIOUS week's last. Pure week-edge math: one past the current
+    /// week's last day, or one before its first.
+    static func pagedStripTarget(
+        from day: String,
+        forward: Bool,
+        firstWeekday: Int = Foundation.Calendar.current.firstWeekday
+    ) -> String {
+        let week = weekDays(containing: day, firstWeekday: firstWeekday)
+        guard let first = week.first?.date, let last = week.last?.date else { return day }
+        return forward ? addDays(last, 1) : addDays(first, -1)
+    }
+
     /// The fetch window backing the strip: the visible week plus a week of
     /// slack each side, so paging never shows an empty strip while it loads
     /// (events [from,to) is end-exclusive → to = last + 1).
@@ -102,6 +116,61 @@ enum MyDayLogic {
         let first = week.first?.date ?? center
         let last = week.last?.date ?? center
         return (addDays(first, -7), addDays(last, 8))
+    }
+
+    // MARK: - The future routine board (scheduled reality, computed here)
+
+    /// The server's weekday codes for a local date. Pure Gregorian math —
+    /// weekday needs no timezone once the date string is local.
+    static func weekdayCode(of date: String) -> String? {
+        guard let day = localDate(date) else { return nil }
+        var calendar = Foundation.Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+        let codes = ["su", "mo", "tu", "we", "th", "fr", "sa"]
+        return codes[calendar.component(.weekday, from: day) - 1]
+    }
+
+    /// The board the server can't serve: routine cards for a FUTURE day,
+    /// synthesized from the definitions ("future days show scheduled
+    /// reality" — the mock's rule; the board endpoint refuses future dates
+    /// because actions can't land there). All tasks open, no streak claims.
+    static func futureBoard(
+        routines: [Components.Schemas.Routine],
+        day: String
+    ) -> [Components.Schemas.RoutineBoardEntry] {
+        guard let code = weekdayCode(of: day) else { return [] }
+        return routines
+            .filter { routine in
+                guard let byWeekday = routine.byWeekday, !byWeekday.isEmpty else { return true }
+                return byWeekday.contains { $0.rawValue == code }
+            }
+            .flatMap { routine in
+                routine.assigneeIds.map { memberId in
+                    Components.Schemas.RoutineBoardEntry(
+                        routineId: routine.id,
+                        title: routine.title,
+                        emoji: routine.emoji,
+                        windowStart: routine.windowStart,
+                        windowEnd: routine.windowEnd,
+                        memberId: memberId,
+                        complete: false,
+                        streak: 0,
+                        tasks: routine.tasks
+                            .sorted { ($0.sortOrder, $0.id) < ($1.sortOrder, $1.id) }
+                            .map { task in
+                                .init(
+                                    taskId: task.id,
+                                    title: task.title,
+                                    emoji: task.emoji,
+                                    starValue: task.starValue,
+                                    status: .open,
+                                    completedByMemberId: nil,
+                                    completedAt: nil
+                                )
+                            }
+                    )
+                }
+            }
     }
 
     // MARK: - Mine-ness

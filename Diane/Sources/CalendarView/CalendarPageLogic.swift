@@ -174,17 +174,19 @@ struct CalendarPageLogic {
     /// family's waking day, not 24 rows of empty night — widened only when
     /// real events fall outside it.
     static let defaultGridStartHour = 7
-    static let defaultGridEndHour = 22
 
-    static func gridWindow(blocks: [DayBlock]) -> (start: Int, end: Int) {
-        var start = defaultGridStartHour
-        var end = defaultGridEndHour
-        for block in blocks {
-            start = min(start, block.startMinutes / 60)
-            let lastMinute = block.startMinutes + block.durationMinutes
-            end = max(end, Int(ceil(Double(lastMinute) / 60)))
+    /// The full-day grid scrolls (owner 2026-08-07: all 24 hours exist —
+    /// the old 07–22 window read as a lost two-thirds of the day). This is
+    /// where it OPENS: today lands a little above the now-line; other days
+    /// at the first event, else the waking morning.
+    static func initialScrollHour(blocks: [DayBlock], isToday: Bool, nowMinutes: Int?) -> Int {
+        if isToday, let now = nowMinutes {
+            return max(0, now / 60 - 2)
         }
-        return (max(start, 0), min(max(end, start + 1), 24))
+        if let first = blocks.map(\.startMinutes).min() {
+            return max(0, first / 60 - 1)
+        }
+        return defaultGridStartHour
     }
 
     /// Snap a drag's grid offset to a 30-minute slot ("HH:mm").

@@ -256,6 +256,7 @@ struct MyDayView: View {
         }
         .listStyle(.plain)
         .fontDesign(.rounded)
+        .refreshable { await load() }
         // The hairline row must hug the seam: List reserves ~44pt per row
         // and pads between sections, which left "now" floating in a band.
         .environment(\.defaultMinListRowHeight, 1)
@@ -294,7 +295,15 @@ struct MyDayView: View {
         _ event: MyDayLogic.Event,
         calendars: [MyDayLogic.CalendarInfo]
     ) -> some View {
-        HStack(spacing: 10) {
+        // Fully-ended events grey in place — same approach as Family Day
+        // (owner 2026-08-07); a past day has ended wholesale.
+        let ended = phase == .past || (phase == .today && FamilyDayLogic.hasEnded(
+            event,
+            minute: TodayLogic.minutes(clock.minute) ?? 0,
+            day: day,
+            timeZone: clock.timeZone
+        ))
+        return HStack(spacing: 10) {
             VStack(alignment: .trailing, spacing: 0) {
                 if event.allDay {
                     Text("all day").font(.caption2).foregroundStyle(.secondary)
@@ -328,9 +337,12 @@ struct MyDayView: View {
             }
             whoBadge(owners: FamilyDayLogic.owners(of: event))
         }
-        .opacity(phase == .future ? 0.55 : phase == .past ? 0.75 : 1)
+        // Finished = the whole row drops its color (owner 2026-08-08).
+        .grayscale(ended ? 1 : 0)
+        .opacity(phase == .future ? 0.55 : ended ? (phase == .past ? 0.75 : 0.5) : 1)
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
         .listRowInsets(rowInsets)
-        .listRowBackground(tintWash(owners: FamilyDayLogic.owners(of: event)))
+        .listRowBackground(tintWash(owners: FamilyDayLogic.owners(of: event)).grayscale(ended ? 1 : 0))
     }
 
     /// Family Day's exact row furniture: facepile for owned rows, the house
@@ -387,8 +399,10 @@ struct MyDayView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             if let emoji = chore.emoji { Text(emoji) }
+                            // Done = crossed AND greyed (owner 2026-08-07).
                             Text(chore.title)
                                 .strikethrough(chore.status == .completed, color: .secondary)
+                                .foregroundStyle(chore.status == .completed ? Color.secondary : Color.primary)
                         }
                         if let note = TodayLogic.completedByNote(chore, names: memberNames) {
                             Text(note).font(.caption).foregroundStyle(.secondary)
@@ -408,8 +422,16 @@ struct MyDayView: View {
                     .foregroundStyle(.orange)
             }
         }
+        // Done = the whole row goes gray — circle, avatar, star, wash
+        // (owner 2026-08-08).
+        .grayscale(chore.status == .completed ? 1 : 0)
+        .opacity(chore.status == .completed ? 0.6 : 1)
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
         .listRowInsets(rowInsets)
-        .listRowBackground(tintWash(owners: FamilyDayLogic.owners(of: chore)))
+        .listRowBackground(
+            tintWash(owners: FamilyDayLogic.owners(of: chore))
+                .grayscale(chore.status == .completed ? 1 : 0)
+        )
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if chore.status == .open && phase != .past {
                 Button("Dismiss") { confirmDismiss = chore }
@@ -560,7 +582,7 @@ struct MyDayView: View {
                 .init(query: .init(from: range.from, to: MyDayLogic.addDays(range.to, -1)))
             )
             async let actionableCall = context.client.api.listChoreOccurrences(.init())
-            async let boardCall = context.client.api.getRoutineBoard(.init(query: .init(date: selected)))
+            async let boardCall = fetchBoard(day: selected)
             async let membersCall = context.client.api.listMembers(.init())
             async let calendarsCall = context.client.api.listCalendars(.init())
 
@@ -583,11 +605,7 @@ struct MyDayView: View {
             case .unauthorized: appState.handleUnauthorized(); return
             default: fail(); return
             }
-            switch try await boardCall {
-            case .ok(let ok): loaded.board = try ok.body.json.entries
-            case .unauthorized: appState.handleUnauthorized(); return
-            default: fail(); return
-            }
+            loaded.board = await boardCall
             switch try await membersCall {
             case .ok(let ok): loaded.members = try ok.body.json.members
             case .unauthorized: appState.handleUnauthorized(); return
@@ -609,6 +627,23 @@ struct MyDayView: View {
     /// shows the failure state (M9 rule).
     private func fail() {
         if data.value == nil { data = .failed("Check the connection and try again.") }
+    }
+
+    /// Today and the recent past come from the real board. FUTURE days come
+    /// from the definitions — "future days show scheduled reality" (mock) —
+    /// because the board endpoint refuses dates actions can't land on; its
+    /// 422 used to sink the whole load and discard every fetched payload.
+    private func fetchBoard(day: String) async -> [Components.Schemas.RoutineBoardEntry] {
+        if day > clock.today {
+            guard case .ok(let ok)? = try? await context.client.api.listRoutines(.init()),
+                  let routines = try? ok.body.json.routines
+            else { return [] }
+            return MyDayLogic.futureBoard(routines: routines, day: day)
+        }
+        guard case .ok(let ok)? = try? await context.client.api.getRoutineBoard(
+            .init(query: .init(date: day))
+        ) else { return [] }
+        return (try? ok.body.json.entries) ?? []
     }
 
     private func act(_ name: String, on chore: MyDayLogic.Chore) async {

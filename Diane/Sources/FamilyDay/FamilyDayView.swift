@@ -2,10 +2,11 @@ import DianeKit
 import SwiftUI
 
 /// Page 2 (M9e design): the family river under the member chips. Chips tap
-/// to filter and double-tap to solo (pre-tap snapshot restored by a second
-/// double-tap); whole-family rows render once with the house glyph and
-/// ignore every filter; the finished past folds away; the pool is pinned
-/// last before the one ghost "+ New". Filter resets on leaving the tab.
+/// to filter and double-tap to solo (owner 2026-08-07 — the mock's chip
+/// grammar; the pushed member glance is retired); whole-family rows render
+/// once with the house glyph and ignore every filter; finished business
+/// greys out in place (owner 2026-08-07 — nothing folds away); the pool is
+/// pinned last before the one ghost "+ New".
 struct FamilyDayView: View {
     let context: SignedInContext
     @Environment(AppState.self) private var appState
@@ -16,7 +17,6 @@ struct FamilyDayView: View {
     @State private var path = NavigationPath()
     @State private var data: Loadable<DayData> = .loading
     @Environment(MemberFilterStore.self) private var filter
-    @State private var foldOpen = false
     @State private var activeSheet: MyDayView.ActiveSheet?
     @State private var confirmDismiss: MyDayLogic.Chore?
     @State private var confirmUncheck: MyDayLogic.Chore?
@@ -62,9 +62,6 @@ struct FamilyDayView: View {
             .dianeRootChrome()
             .task(id: "\(signals.version(of: [.chores, .events, .calendars, .members, .settings]))|\(day)") {
                 await load()
-            }
-            .navigationDestination(for: Components.Schemas.Member.self) { member in
-                FamilyMemberDayView(context: context, member: member, day: day, open: open)
             }
             .dianeDetailDestinations(
                 context: context,
@@ -170,14 +167,13 @@ struct FamilyDayView: View {
                 }
                 .opacity(isOn ? 1 : 0.35)
                 .onTapGesture(count: 2) {
-                    // Double-tap: the member's own page (the pushed glance).
-                    path.append(member)
-                }
-                .onTapGesture { filter.toggle(member.id, all: allIDs) }
-                .onLongPressGesture {
-                    // Long-press solos; a second long-press restores everyone.
+                    // Double-tap OR long-press solos — both on trial (owner
+                    // 2026-08-08, "so I can check what I use more"); a
+                    // second solo restores everyone.
                     filter.solo(member.id)
                 }
+                .onTapGesture { filter.toggle(member.id, all: allIDs) }
+                .onLongPressGesture { filter.solo(member.id) }
                 .accessibilityLabel("\(member.name), \(Int(chip.progress * 100)) percent done\(chip.hasLate ? ", has late chores" : "")")
             }
         }
@@ -242,7 +238,7 @@ struct FamilyDayView: View {
             ? MyDayLogic.nowLineIndex(items: river.flowing, minute: clock.minute, timeZone: clock.timeZone)
             : nil
 
-        let isEmpty = river.catchUp.isEmpty && river.folded.isEmpty
+        let isEmpty = river.catchUp.isEmpty
             && river.flowing.isEmpty && river.noSetTime.isEmpty && river.pool.isEmpty
 
         return List {
@@ -261,34 +257,11 @@ struct FamilyDayView: View {
                     ForEach(river.catchUp, id: \.id) { chore in choreRow(chore, loaded: loaded, late: true, neutralTint: true) }
                 } header: { header("Catch up").foregroundStyle(.red) }
             }
-            // The fold row stands alone — no extra section header (mock).
-            if !river.folded.isEmpty && phase == .today {
+            // Nothing folds away (owner 2026-08-07): the whole day stands in
+            // time order, finished things greyed in place.
+            if !river.flowing.isEmpty {
                 Section {
-                    Button {
-                        foldOpen.toggle()
-                    } label: {
-                        HStack {
-                            Text(FamilyDayLogic.foldLabel(river.folded))
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Image(systemName: "chevron.down")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .rotationEffect(.degrees(foldOpen ? 180 : 0))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .listRowInsets(rowInsets)
-                    if foldOpen {
-                        ForEach(river.folded, id: \.id) { item in riverRow(item, loaded: loaded) }
-                    }
-                }
-            }
-            if !(river.flowing.isEmpty && (phase != .today || river.folded.isEmpty)) {
-                Section {
-                    let items = phase == .today ? river.flowing : river.folded + river.flowing
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    ForEach(Array(river.flowing.enumerated()), id: \.element.id) { index, item in
                         if index == nowIndex { NowLineRow(minute: clock.minute) }
                         riverRow(item, loaded: loaded)
                     }
@@ -330,6 +303,7 @@ struct FamilyDayView: View {
         }
         .listStyle(.plain)
         .fontDesign(.rounded)
+        .refreshable { await load() }
         // The hairline row must hug the seam: List reserves ~44pt per row
         // and pads between sections, which left "now" floating in a band.
         .environment(\.defaultMinListRowHeight, 1)
@@ -355,6 +329,14 @@ struct FamilyDayView: View {
 
     private func eventRow(_ event: MyDayLogic.Event, loaded: DayData) -> some View {
         let owners = FamilyDayLogic.owners(of: event)
+        // Fully-ended events grey in place, they never hide (owner
+        // 2026-08-07). A past day has ended wholesale.
+        let ended = phase == .past || (phase == .today && FamilyDayLogic.hasEnded(
+            event,
+            minute: TodayLogic.minutes(clock.minute) ?? 0,
+            day: day,
+            timeZone: clock.timeZone
+        ))
         return HStack(spacing: 10) {
             timeCol(event.allDay ? "all day" : event.startsAt.flatMap { TodayLogic.timeLabel($0, timeZone: clock.timeZone) } ?? "")
             RoundedRectangle(cornerRadius: 2)
@@ -370,9 +352,16 @@ struct FamilyDayView: View {
             }
             whoBadge(owners: owners)
         }
-        .opacity(phase == .future ? 0.55 : 1)
+        // Finished = the WHOLE row drops its color — rail, facepile, wash,
+        // everything (owner 2026-08-08: "remove color from those elements
+        // completely"). Grayscale, not just dimming.
+        .grayscale(ended ? 1 : 0)
+        .opacity(phase == .future ? 0.55 : ended ? 0.5 : 1)
+        // One separator line for every row, late or not (owner 2026-08-08)
+        // — the varying leading columns were sliding it around.
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
         .listRowInsets(rowInsets)
-        .listRowBackground(tintBackground(owners: owners))
+        .listRowBackground(tintBackground(owners: owners).grayscale(ended ? 1 : 0))
     }
 
     private func choreRow(
@@ -390,7 +379,11 @@ struct FamilyDayView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             if let emoji = chore.emoji { Text(emoji) }
-                            Text(chore.title).strikethrough(chore.status == .completed, color: .secondary)
+                            // Done = crossed AND greyed (owner 2026-08-07),
+                            // so finished work stops shouting.
+                            Text(chore.title)
+                                .strikethrough(chore.status == .completed, color: .secondary)
+                                .foregroundStyle(chore.status == .completed ? Color.secondary : Color.primary)
                         }
                         if let note = TodayLogic.completedByNote(chore, names: memberNames) {
                             Text(note).font(.caption).foregroundStyle(.secondary)
@@ -405,8 +398,16 @@ struct FamilyDayView: View {
                 Text("★ \(chore.starValue)").font(.caption.weight(.semibold)).foregroundStyle(.orange)
             }
         }
+        // Done = the whole row goes gray — circle, avatar, star, wash
+        // (owner 2026-08-08).
+        .grayscale(chore.status == .completed ? 1 : 0)
+        .opacity(chore.status == .completed ? 0.6 : 1)
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
         .listRowInsets(rowInsets)
-        .listRowBackground(neutralTint ? nil : tintBackground(owners: owners))
+        .listRowBackground(
+            Group { if !neutralTint { tintBackground(owners: owners) } }
+                .grayscale(chore.status == .completed ? 1 : 0)
+        )
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if chore.status == .open && phase != .past {
                 Button("Dismiss") { confirmDismiss = chore }.tint(.orange)
@@ -439,6 +440,7 @@ struct FamilyDayView: View {
                 Text("★ \(chore.starValue)").font(.subheadline.weight(.bold)).foregroundStyle(.orange)
             }
         }
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
         .listRowInsets(rowInsets)
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if phase == .today {
@@ -527,7 +529,7 @@ struct FamilyDayView: View {
                 .init(query: .init(from: range.from, to: MyDayLogic.addDays(range.to, -1)))
             )
             async let actionableCall = context.client.api.listChoreOccurrences(.init())
-            async let boardCall = context.client.api.getRoutineBoard(.init(query: .init(date: day)))
+            async let boardCall = fetchBoard(day: day)
             async let membersCall = context.client.api.listMembers(.init())
             async let calendarsCall = context.client.api.listCalendars(.init())
 
@@ -547,11 +549,7 @@ struct FamilyDayView: View {
             case .unauthorized: appState.handleUnauthorized(); return
             default: fail(); return
             }
-            switch try await boardCall {
-            case .ok(let ok): loaded.board = try ok.body.json.entries
-            case .unauthorized: appState.handleUnauthorized(); return
-            default: fail(); return
-            }
+            loaded.board = await boardCall
             switch try await membersCall {
             case .ok(let ok): loaded.members = try ok.body.json.members
             case .unauthorized: appState.handleUnauthorized(); return
@@ -571,6 +569,17 @@ struct FamilyDayView: View {
 
     private func fail() {
         if data.value == nil { data = .failed("Check the connection and try again.") }
+    }
+
+    /// The board is garnish here (chip rings) and its endpoint refuses
+    /// future dates by design — a 422 must never sink the whole load, which
+    /// it used to: every fetched payload was discarded on future days.
+    private func fetchBoard(day: String) async -> [Components.Schemas.RoutineBoardEntry] {
+        guard day <= clock.today else { return [] }
+        guard case .ok(let ok)? = try? await context.client.api.getRoutineBoard(
+            .init(query: .init(date: day))
+        ) else { return [] }
+        return (try? ok.body.json.entries) ?? []
     }
 
     private func act(_ name: String, on chore: MyDayLogic.Chore) async {

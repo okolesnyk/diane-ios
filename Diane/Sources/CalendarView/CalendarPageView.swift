@@ -9,13 +9,17 @@ import SwiftUI
 /// long-jump picker; Today is the one return-home control.
 struct CalendarPageView: View {
     let context: SignedInContext
+    /// The caller's stack takes the detail pushes (nav rule 2). The page
+    /// itself never owns a NavigationStack — nesting one silently killed
+    /// the Home push — and always wears its own root bar: a module looks
+    /// the same from the bottom menu and from Home (owner 2026-08-08).
+    var open: (DetailRoute) -> Void = { _ in }
     @Environment(AppState.self) private var appState
     @Environment(SyncSignals.self) private var signals
     @Environment(HouseholdClock.self) private var clock
 
     /// nil = follow the household's today.
     @State private var selectedDay: String?
-    @State private var path = NavigationPath()
     /// Header + mode survive relaunch ("you reopen the calendar you left").
     @AppStorage("calExpanded") private var expanded = false
     @AppStorage("calDayMode") private var dayMode = false
@@ -23,6 +27,8 @@ struct CalendarPageView: View {
     @State private var activeSheet: Sheet?
     /// The drag-create draft: (startMinutes, endMinutes) while dragging.
     @State private var draft: (start: Int, end: Int)?
+    /// Where the hold landed — the draft grows from here in both directions.
+    @State private var draftAnchor: Int?
     /// Member chip filter — one app-wide store (owner 2026-08-06).
     @Environment(MemberFilterStore.self) private var filter
     /// Member tint — the device-local display pref.
@@ -48,11 +54,11 @@ struct CalendarPageView: View {
     }
 
     enum Sheet: Identifiable {
-        case newEvent(date: String, time: String?)
+        case newEvent(date: String, time: String?, end: String?)
 
         var id: String {
             switch self {
-            case .newEvent(let date, let time): "new-\(date)-\(time ?? "")"
+            case .newEvent(let date, let time, _): "new-\(date)-\(time ?? "")"
             }
         }
     }
@@ -66,8 +72,6 @@ struct CalendarPageView: View {
 
     private var day: String { selectedDay ?? clock.today }
 
-    private func open(_ route: DetailRoute) { path.append(route) }
-
     private var anchorDate: Date {
         let parts = day.split(separator: "-").compactMap { Int(String($0)) }
         var components = DateComponents()
@@ -78,52 +82,50 @@ struct CalendarPageView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $path) {
-            VStack(spacing: 0) {
-                DianeTopBar(
-                    context: context,
-                    title: logic.monthTitle(anchorDate),
-                    action: {
-                        pickerYear = Int(day.prefix(4)) ?? 2026
-                        showJumpPicker = true
-                    },
-                    chevron: true,
-                    showToday: day != clock.today,
-                    onToday: { selectedDay = nil },
-                    popover: $showJumpPicker,
-                    popoverContent: { AnyView(jumpPicker.presentationCompactAdaptation(.popover)) }
-                )
-                header
-                chips
-                Picker("View", selection: $dayMode) {
-                    Text("Agenda").tag(false)
-                    Text("Day").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
-                Divider()
-                if dayMode { dayGrid } else { agendaList }
-            }
-            .dianeRootChrome()
-            .task(id: "\(signals.version(of: [.events, .chores, .calendars, .members, .settings]))|\(fetchRange.from)|\(fetchRange.to)") {
-                await load()
-            }
-            .dianeDetailDestinations(
+        VStack(spacing: 0) {
+            DianeTopBar(
                 context: context,
-                members: data.value?.members ?? [],
-                onChanged: { Task { await load() } }
+                title: logic.monthTitle(anchorDate),
+                action: {
+                    pickerYear = Int(day.prefix(4)) ?? 2026
+                    showJumpPicker = true
+                },
+                chevron: true,
+                showToday: day != clock.today,
+                onToday: { selectedDay = nil },
+                popover: $showJumpPicker,
+                popoverContent: { AnyView(jumpPicker.presentationCompactAdaptation(.popover)) }
             )
-            .sheet(item: $activeSheet) { sheet in
-                switch sheet {
-                case .newEvent(let date, _):
-                    EventFormView(
-                        context: context,
-                        members: data.value?.members ?? [],
-                        mode: .create(defaultDate: date),
-                        onSaved: { Task { await load() } }
-                    )
-                }
+            header
+            chips
+            Picker("View", selection: $dayMode) {
+                Text("Agenda").tag(false)
+                Text("Day").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            Divider()
+            if dayMode { dayGrid } else { agendaList }
+        }
+        .dianeRootChrome()
+        .task(id: "\(signals.version(of: [.events, .chores, .calendars, .members, .settings]))|\(fetchRange.from)|\(fetchRange.to)") {
+            await load()
+        }
+        .dianeDetailDestinations(
+            context: context,
+            members: data.value?.members ?? [],
+            onChanged: { Task { await load() } }
+        )
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .newEvent(let date, let time, let end):
+                EventFormView(
+                    context: context,
+                    members: data.value?.members ?? [],
+                    mode: .create(defaultDate: date, defaultTime: time, defaultEnd: end),
+                    onSaved: { Task { await load() } }
+                )
             }
         }
     }
@@ -201,6 +203,9 @@ struct CalendarPageView: View {
                     Text(member.name).font(.caption2).lineLimit(1)
                 }
                 .opacity(isOn ? 1 : 0.35)
+                // Double-tap OR long-press solos — both on trial (owner
+                // 2026-08-08).
+                .onTapGesture(count: 2) { filter.solo(member.id) }
                 .onTapGesture { filter.toggle(member.id, all: allIDs) }
                 .onLongPressGesture { filter.solo(member.id) }
                 .accessibilityLabel("\(member.name)\(isOn ? "" : ", filtered out")")
@@ -257,10 +262,17 @@ struct CalendarPageView: View {
     }
 
     private func page(by direction: Int) {
-        let next = expanded
-            ? logic.page(anchorDate, byMonths: direction)
-            : logic.page(anchorDate, byWeeks: direction)
-        select(logic.week.dayString(next))
+        if expanded {
+            select(logic.week.dayString(logic.page(anchorDate, byMonths: direction)))
+        } else {
+            // Same landing rule as the day pages' strips (owner 2026-08-08):
+            // forward = next week's first day, back = previous week's last.
+            select(MyDayLogic.pagedStripTarget(
+                from: day,
+                forward: direction > 0,
+                firstWeekday: logic.calendar.firstWeekday
+            ))
+        }
     }
 
     private func select(_ newDay: String) {
@@ -348,7 +360,7 @@ struct CalendarPageView: View {
                                 // ONE add affordance: the ghost row under the
                                 // SELECTED day, moving with the selection.
                                 Button {
-                                    activeSheet = .newEvent(date: d, time: nil)
+                                    activeSheet = .newEvent(date: d, time: nil, end: nil)
                                 } label: {
                                     GhostLabel(title: "New event")
                                 }
@@ -370,6 +382,7 @@ struct CalendarPageView: View {
                 }
                 .listStyle(.plain)
                 .fontDesign(.rounded)
+                .refreshable { await load() }
                 .onChange(of: day) { _, newDay in
                     withAnimation { proxy.scrollTo(newDay, anchor: .top) }
                 }
@@ -447,24 +460,41 @@ struct CalendarPageView: View {
                 $0.allDay && logic.week.occursOn(day: day, occurrence: $0)
                     && FamilyDayLogic.visible($0, selected: effectiveSelected)
             }
-            ScrollView {
-                VStack(spacing: 0) {
-                    if !allDay.isEmpty {
-                        ForEach(allDay, id: \.id) { event in
-                            HStack(spacing: 8) {
-                                Text("all day").font(.caption2).foregroundStyle(.secondary)
-                                    .frame(width: gutter, alignment: .trailing)
-                                RoundedRectangle(cornerRadius: 2)
-                                    .fill(railColor(event, loaded: loaded)).frame(width: 4, height: 20)
-                                Text(event.summary).font(.subheadline)
-                                Spacer()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        if !allDay.isEmpty {
+                            ForEach(allDay, id: \.id) { event in
+                                HStack(spacing: 8) {
+                                    Text("all day").font(.caption2).foregroundStyle(.secondary)
+                                        .frame(width: gutter, alignment: .trailing)
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(railColor(event, loaded: loaded)).frame(width: 4, height: 20)
+                                    DetailRow(route: .event(event), open: open) {
+                                        Text(event.summary).font(.subheadline)
+                                    }
+                                    Spacer()
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
                             }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
+                            Divider()
                         }
-                        Divider()
+                        gridBody(blocks: blocks, loaded: loaded)
                     }
-                    gridBody(blocks: blocks, loaded: loaded)
+                }
+                // One finger scrolls; hold-then-drag draws. The pan is cut
+                // only once a draft actually exists — a moving finger fails
+                // the long press and scrolls normally (owner 2026-08-07:
+                // "make scrolling work with 1 finger").
+                .scrollDisabled(draft != nil)
+                .refreshable { await load() }
+                // Re-anchored per day AND per data arrival: an onAppear-only
+                // scrollTo fires before the loaded grid has laid out and
+                // lands on 00:00. The breath lets layout settle first.
+                .task(id: "\(day)|\(data.value?.events.count ?? -1)") {
+                    try? await Task.sleep(for: .milliseconds(120))
+                    scrollToAnchor(proxy, blocks: blocks, animated: false)
                 }
             }
         } else {
@@ -472,25 +502,83 @@ struct CalendarPageView: View {
         }
     }
 
+    /// Open the full-day grid at the useful part of the day: the now-line on
+    /// today, the first event elsewhere, the waking morning on empty days.
+    private func scrollToAnchor(_ proxy: ScrollViewProxy, blocks: [CalendarPageLogic.DayBlock], animated: Bool) {
+        let hour = CalendarPageLogic.initialScrollHour(
+            blocks: blocks,
+            isToday: day == clock.today,
+            nowMinutes: TodayLogic.minutes(clock.minute)
+        )
+        if animated {
+            withAnimation { proxy.scrollTo("hour-\(hour)", anchor: .top) }
+        } else {
+            proxy.scrollTo("hour-\(hour)", anchor: .top)
+        }
+    }
+
     private func gridBody(blocks: [CalendarPageLogic.DayBlock], loaded: PageData) -> some View {
-        let window = CalendarPageLogic.gridWindow(blocks: blocks)
-        let hours = Array(window.start...window.end)
-        // Everything positions against the window's first hour.
-        let y = { (minutes: Int) in CGFloat(minutes - window.start * 60) / 60 * hourHeight }
+        // All 24 hours exist (owner 2026-08-07) — the grid scrolls, and
+        // scrollToAnchor opens it at the useful part of the day.
+        let hours = Array(0...23)
+        let gridHeight = CGFloat(24) * hourHeight + 12
+        let y = { (minutes: Int) in CGFloat(minutes) / 60 * hourHeight }
         return GeometryReader { proxy in
             let laneWidth = proxy.size.width - gutter - 12
             ZStack(alignment: .topLeading) {
-                ForEach(hours, id: \.self) { hour in
-                    HStack(spacing: 8) {
-                        Text(String(format: "%02d:00", hour))
-                            .font(.caption2)
-                            .monospacedDigit()
-                            .foregroundStyle(.tertiary)
-                            .frame(width: gutter, alignment: .trailing)
-                        VStack { Divider() }
+                // The hour rows are REAL layout (a VStack of fixed-height
+                // cells), not offsets: scrollTo needs true frames — offset
+                // rows all "live" at y=0 and the reader lands on 00:00.
+                VStack(spacing: 0) {
+                    ForEach(hours, id: \.self) { hour in
+                        HStack(spacing: 8) {
+                            Text(String(format: "%02d:00", hour))
+                                .font(.caption2)
+                                .monospacedDigit()
+                                .foregroundStyle(.tertiary)
+                                .frame(width: gutter, alignment: .trailing)
+                            VStack { Divider() }
+                        }
+                        .offset(y: -6) // label rides ON its line, cosmetic only
+                        .frame(height: hourHeight, alignment: .top)
+                        .id("hour-\(hour)")
                     }
-                    .offset(y: y(hour * 60) - 6)
                 }
+                // UIKit long-press, not a SwiftUI gesture: even attached as
+                // simultaneous, the sequenced LongPress+Drag starved the
+                // ScrollView's pan and one-finger scrolling died (owner
+                // 2026-08-07). The UIKit recognizer arbitrates natively:
+                // movement pans, a stationary hold claims the touch and
+                // cancels the scroll. Sits UNDER the blocks, so empty slots
+                // draft and block taps still open details.
+                HoldToDraftOverlay(
+                    began: { point in
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        let start = (Int(point.y / hourHeight * 60) / 30) * 30
+                        draftAnchor = start
+                        draft = (start, start + 30)
+                    },
+                    moved: { point in
+                        guard let anchor = draftAnchor else { return }
+                        let at = (Int(point.y / hourHeight * 60) / 30) * 30
+                        draft = (min(anchor, at), max(anchor, at) + 30)
+                    },
+                    ended: {
+                        defer { draft = nil; draftAnchor = nil }
+                        guard let d = draft else { return }
+                        // The mock's contract: the form opens with THOSE times.
+                        activeSheet = .newEvent(
+                            date: day,
+                            time: CalendarPageLogic.snappedSlot(minutes: d.start),
+                            end: CalendarPageLogic.snappedSlot(minutes: d.end)
+                        )
+                    },
+                    cancelled: {
+                        draft = nil
+                        draftAnchor = nil
+                    }
+                )
+                .frame(width: proxy.size.width, height: gridHeight)
                 // Event blocks: calendar-color line, member-tint fill.
                 ForEach(blocks) { block in
                     let width = laneWidth / CGFloat(block.laneCount)
@@ -549,25 +637,13 @@ struct CalendarPageView: View {
                     .allowsHitTesting(false)
                 }
             }
-            .contentShape(Rectangle())
-            .gesture(
-                LongPressGesture(minimumDuration: 0.25)
-                    .sequenced(before: DragGesture(minimumDistance: 0))
-                    .onChanged { value in
-                        guard case .second(true, let drag?) = value else { return }
-                        let base = window.start * 60
-                        let start = base + Int(min(drag.startLocation.y, drag.location.y) / hourHeight * 60)
-                        let end = base + Int(max(drag.startLocation.y, drag.location.y) / hourHeight * 60)
-                        draft = ((start / 30) * 30, max((end / 30) * 30 + 30, (start / 30) * 30 + 30))
-                    }
-                    .onEnded { value in
-                        guard case .second(true, _) = value, let d = draft else { draft = nil; return }
-                        draft = nil
-                        activeSheet = .newEvent(date: day, time: CalendarPageLogic.snappedSlot(minutes: d.start))
-                    }
-            )
+            // The explicit full-size frame is what makes the grid WORK: the
+            // ZStack's natural size ignores offset children, which left taps
+            // and the create gesture a sliver at the top (owner bug report
+            // 2026-08-07 — "day view doesn't open events").
+            .frame(width: proxy.size.width, height: gridHeight, alignment: .topLeading)
         }
-        .frame(height: CGFloat(hours.count) * hourHeight + 12)
+        .frame(height: gridHeight)
         .padding(.top, 8)
     }
 
@@ -621,5 +697,50 @@ struct CalendarPageView: View {
 
     private func fail() {
         if data.value == nil { data = .failed("Check the connection and try again.") }
+    }
+}
+
+/// A UIKit long-press layer for the day grid. SwiftUI's sequenced
+/// LongPress+Drag claimed every touch (even as a simultaneous gesture) and
+/// killed one-finger scrolling; UIKit's recognizer is how Apple Calendar
+/// does it — touches pass through to the scroll view until the hold fires,
+/// then the recognizer owns the finger and streams the drag.
+private struct HoldToDraftOverlay: UIViewRepresentable {
+    var began: (CGPoint) -> Void
+    var moved: (CGPoint) -> Void
+    var ended: () -> Void
+    var cancelled: () -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.backgroundColor = .clear
+        let recognizer = UILongPressGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handle(_:))
+        )
+        recognizer.minimumPressDuration = 0.3
+        view.addGestureRecognizer(recognizer)
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.parent = self
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    final class Coordinator: NSObject {
+        var parent: HoldToDraftOverlay
+        init(parent: HoldToDraftOverlay) { self.parent = parent }
+
+        @objc func handle(_ recognizer: UILongPressGestureRecognizer) {
+            let point = recognizer.location(in: recognizer.view)
+            switch recognizer.state {
+            case .began: parent.began(point)
+            case .changed: parent.moved(point)
+            case .ended: parent.ended()
+            default: parent.cancelled()
+            }
+        }
     }
 }

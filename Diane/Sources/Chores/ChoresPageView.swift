@@ -183,8 +183,10 @@ struct ChoresPageView: View {
         }
         .opacity(isOn ? 1 : 0.35)
         .contentShape(Rectangle())
+        // Double-tap OR long-press solos — both on trial (owner 2026-08-08);
+        // solo keeps Anyone on: unowned chores stay everyone's business.
+        .onTapGesture(count: 2) { filter.solo([member.id, ChoresPageLogic.poolID]) }
         .onTapGesture { filter.toggle(member.id, all: allIDs) }
-        // Solo keeps Anyone on: unowned chores stay everyone's business.
         .onLongPressGesture { filter.solo([member.id, ChoresPageLogic.poolID]) }
         .accessibilityLabel(
             "\(member.name), \(Int(chip.progress * 100)) percent done\(chip.hasLate ? ", has late chores" : "")"
@@ -217,6 +219,7 @@ struct ChoresPageView: View {
         }
         .opacity(isOn ? 1 : 0.35)
         .contentShape(Rectangle())
+        .onTapGesture(count: 2) { filter.solo([ChoresPageLogic.poolID]) }
         .onTapGesture { filter.toggle(ChoresPageLogic.poolID, all: allIDs) }
         .onLongPressGesture { filter.solo([ChoresPageLogic.poolID]) }
         .accessibilityLabel("Anyone, \(count) chores waiting")
@@ -274,14 +277,8 @@ struct ChoresPageView: View {
                     header(section)
                 }
             }
-            if tab != .scheduled {
-                Text("A dashed circle is anyone's chore — tap it to do it and keep the stars. Done today stays checked until midnight.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .multilineTextAlignment(.center)
-                    .listRowSeparator(.hidden)
-            }
+            // No footer explainer (owner 2026-08-07) — the dashed circle
+            // speaks for itself.
         }
         .listStyle(.plain)
         .fontDesign(.rounded)
@@ -342,8 +339,13 @@ struct ChoresPageView: View {
                     .foregroundStyle(row.completed ? Color.secondary : Color.orange)
             }
         }
+        // Done = the whole row goes gray — circle, avatar, star, wash
+        // (owner 2026-08-08).
+        .grayscale(row.completed ? 1 : 0)
+        .opacity(row.completed ? 0.6 : 1)
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
         .listRowInsets(rowInsets)
-        .listRowBackground(tintWash(owners: row.owners))
+        .listRowBackground(tintWash(owners: row.owners).grayscale(row.completed ? 1 : 0))
         .overlay(alignment: .trailing) {
             if floatingStar == row.id {
                 StarFloat(text: "+\(row.starValue) ★")

@@ -159,4 +159,75 @@ import DianeKit
         let empty = MyDayLogic.dots(for: "2026-08-09", events: [event()], chores: [chore()], me: "me", timeZone: tz)
         #expect(!empty.hasEvents && !empty.hasChores)
     }
+
+    /// Owner 2026-08-08: a strip swipe lands on the day NEAREST to where
+    /// you came from — next week's first day, previous week's last.
+    @Test func stripPagingLandsOnTheNearestEdgeDay() {
+        // Monday-start week containing Thu Aug 6: Mon 3 … Sun 9.
+        #expect(MyDayLogic.pagedStripTarget(from: "2026-08-06", forward: true, firstWeekday: 2) == "2026-08-10")
+        #expect(MyDayLogic.pagedStripTarget(from: "2026-08-06", forward: false, firstWeekday: 2) == "2026-08-02")
+        // Sunday-start week: Sun 2 … Sat 8.
+        #expect(MyDayLogic.pagedStripTarget(from: "2026-08-06", forward: true, firstWeekday: 1) == "2026-08-09")
+        #expect(MyDayLogic.pagedStripTarget(from: "2026-08-06", forward: false, firstWeekday: 1) == "2026-08-01")
+    }
+
+    // MARK: - The future routine board (scheduled reality from definitions)
+
+    private func routine(
+        id: String = "r1",
+        byWeekday: [String]? = nil,
+        assignees: [String] = ["me"],
+        tasks: [(String, Int)] = [("Brush teeth", 1)]
+    ) -> Components.Schemas.Routine {
+        .init(
+            id: id,
+            title: "Routine \(id)",
+            emoji: nil,
+            windowStart: "07:00",
+            windowEnd: "09:00",
+            byWeekday: byWeekday?.compactMap { .init(rawValue: $0) },
+            assigneeIds: assignees,
+            tasks: tasks.enumerated().map { index, task in
+                .init(id: "t\(index)", title: task.0, emoji: nil, starValue: task.1, sortOrder: index)
+            },
+            sortOrder: 0,
+            createdAt: "2026-01-01T00:00:00.000Z"
+        )
+    }
+
+    @Test func weekdayCodesMatchTheServer() {
+        #expect(MyDayLogic.weekdayCode(of: "2026-08-07") == "fr")
+        #expect(MyDayLogic.weekdayCode(of: "2026-08-08") == "sa")
+        #expect(MyDayLogic.weekdayCode(of: "2026-08-09") == "su")
+        #expect(MyDayLogic.weekdayCode(of: "garbage") == nil)
+    }
+
+    @Test func futureBoardFollowsTheSchedule() {
+        let routines = [
+            routine(id: "daily", byWeekday: nil),
+            routine(id: "weekend", byWeekday: ["sa", "su"]),
+            routine(id: "weekday", byWeekday: ["mo", "tu", "we", "th", "fr"]),
+        ]
+        // Saturday: daily + weekend, never the weekday one.
+        let saturday = MyDayLogic.futureBoard(routines: routines, day: "2026-08-08")
+        #expect(saturday.map(\.routineId) == ["daily", "weekend"])
+        // Friday: daily + weekday.
+        let friday = MyDayLogic.futureBoard(routines: routines, day: "2026-08-07")
+        #expect(friday.map(\.routineId) == ["daily", "weekday"])
+    }
+
+    @Test func futureBoardFansOutPerAssigneeAllOpen() {
+        let entries = MyDayLogic.futureBoard(
+            routines: [routine(assignees: ["kid", "me"], tasks: [("B", 2), ("A", 1)])],
+            day: "2026-08-08"
+        )
+        #expect(entries.map(\.memberId) == ["kid", "me"])
+        for entry in entries {
+            #expect(!entry.complete)
+            #expect(entry.streak == 0)
+            // Task order is the definition's sortOrder.
+            #expect(entry.tasks.map(\.title) == ["B", "A"])
+            #expect(entry.tasks.allSatisfy { $0.status == .open })
+        }
+    }
 }

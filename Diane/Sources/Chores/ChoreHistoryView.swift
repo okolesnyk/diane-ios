@@ -162,7 +162,8 @@ struct ChoreHistoryView: View {
                 }
             }
             // Scrolling to the end asks for the next page — no button, no
-            // page numbers, the feed just keeps going.
+            // page numbers, the feed just keeps going. No footer copy at
+            // the end either (owner 2026-08-07).
             if loaded.nextBefore != nil {
                 HStack {
                     Spacer()
@@ -172,13 +173,6 @@ struct ChoreHistoryView: View {
                 .frame(minHeight: 44)
                 .listRowSeparator(.hidden)
                 .onAppear { Task { await loadMore() } }
-            } else {
-                Text("A feed, not a scoreboard — no per-member totals, ever.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .multilineTextAlignment(.center)
-                    .listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)

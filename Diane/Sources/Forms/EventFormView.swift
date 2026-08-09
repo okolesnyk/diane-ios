@@ -220,11 +220,19 @@ enum EventFormLogic {
         var until = ""
     }
 
-    static func initial(defaultDate: String, calendarId: String, timeZone: TimeZone) -> State {
+    static func initial(
+        defaultDate: String,
+        calendarId: String,
+        timeZone: TimeZone,
+        defaultTime: String? = nil,
+        defaultEnd: String? = nil
+    ) -> State {
         var state = State()
         state.calendarId = calendarId
-        state.start = FormDates.instant(ymd: defaultDate, hm: "09:00", timeZone: timeZone) ?? Date()
-        state.end = FormDates.instant(ymd: defaultDate, hm: "10:00", timeZone: timeZone) ?? Date()
+        state.start = FormDates.instant(ymd: defaultDate, hm: defaultTime ?? "09:00", timeZone: timeZone) ?? Date()
+        // A drawn end wins; otherwise an hour after the start.
+        state.end = defaultEnd.flatMap { FormDates.instant(ymd: defaultDate, hm: $0, timeZone: timeZone) }
+            ?? state.start.addingTimeInterval(3600)
         state.firstDay = defaultDate
         state.lastDay = defaultDate
         state.until = defaultDate
@@ -625,8 +633,15 @@ struct FormWeekdayChips: View {
 // MARK: - Screen
 
 enum EventFormMode {
-    case create(defaultDate: String)  // "YYYY-MM-DD"
+    /// Times are "HH:mm" or nil — the day-grid drag passes the drawn slot
+    /// so the form opens with those times filled in (the mock's contract).
+    case create(defaultDate: String, defaultTime: String?, defaultEnd: String?)
     case edit(Components.Schemas.EventOccurrence)
+
+    /// The plain-date spelling every ghost row uses.
+    static func create(defaultDate: String) -> EventFormMode {
+        .create(defaultDate: defaultDate, defaultTime: nil, defaultEnd: nil)
+    }
 }
 
 /// Create/edit sheet for events — EVERY member may use it (kiosk trust,
@@ -888,7 +903,7 @@ struct EventFormView: View {
             state = EventFormLogic.seed(from: occurrence, timeZone: clock.timeZone)
             original = state  // R4
             seeded = true
-        case .create(let defaultDate):
+        case .create(let defaultDate, let defaultTime, let defaultEnd):
             calendars = .loading
             do {
                 switch try await context.client.api.listCalendars(.init()) {
@@ -898,7 +913,9 @@ struct EventFormView: View {
                     state = EventFormLogic.initial(
                         defaultDate: defaultDate,
                         calendarId: EventFormLogic.defaultCalendarId(writable) ?? "",
-                        timeZone: clock.timeZone
+                        timeZone: clock.timeZone,
+                        defaultTime: defaultTime,
+                        defaultEnd: defaultEnd
                     )
                     original = state  // R4
                     seeded = true

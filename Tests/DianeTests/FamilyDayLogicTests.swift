@@ -49,14 +49,18 @@ import Testing
         #expect(set == Set(all))
     }
 
-    @Test func riverPartitionsThePool_CatchUp_Fold_AndFlow() {
+    @Test func riverPartitionsThePool_CatchUp_AndFlow() {
         let tz = TimeZone(identifier: "UTC")!
         let river = FamilyDayLogic.river(
             events: [],
             chores: [
                 chore(id: "pool", owner: nil),
                 chore(id: "late", late: true),
-                chore(id: "done", status: .completed),
+                // Done chores stay IN PLACE, crossed and grey (owner
+                // 2026-08-07) — a timed one in the flow, an untimed one on
+                // the No set time shelf. Nothing folds away.
+                chore(id: "done", dueTime: "09:00", status: .completed),
+                chore(id: "doneLoose", status: .completed),
                 chore(id: "timed", dueTime: "18:00"),
                 chore(id: "loose"),
             ],
@@ -65,11 +69,10 @@ import Testing
             minute: "12:00",
             timeZone: tz
         )
-        #expect(river.pool.map(\.id) == ["pool"])
-        #expect(river.catchUp.map(\.id) == ["late"])
-        #expect(river.folded.map(\.id) == ["ch-done"])
-        #expect(river.flowing.map(\.id) == ["ch-timed"])
-        #expect(river.noSetTime.map(\.id) == ["loose"])
+        #expect(river.pool.map(\Chore.id) == ["pool"])
+        #expect(river.catchUp.map(\Chore.id) == ["late"])
+        #expect(river.flowing.map(\.id) == ["ch-done", "ch-timed"])
+        #expect(river.noSetTime.map(\Chore.id) == ["doneLoose", "loose"])
     }
 
     @Test func poolIsImmuneToTheFilterButClaimedRowsAreNot() {
@@ -90,7 +93,7 @@ import Testing
         #expect(river.flowing.isEmpty && river.noSetTime.isEmpty)
     }
 
-    @Test func ongoingEventsNeverFoldAndGraceIs15Minutes() {
+    @Test func everyEventFlowsAndEndedIsAPureGreyPredicate() {
         let tz = TimeZone(identifier: "UTC")!
         func ev(_ id: String, start: String, end: String) -> MyDayLogic.Event {
             MyDayLogic.Event(
@@ -99,38 +102,44 @@ import Testing
                 startDate: nil, endDate: nil, memberIds: nil
             )
         }
-        // Started 08:00, ends 13:00 — at 12:00 it is ONGOING: stays flowing.
+        // Nothing hides any more (owner 2026-08-07): ongoing, just-ended and
+        // long-ended all stay in the flow, time-ordered.
         let ongoing = ev("ongoing", start: "2026-08-06T08:00:00.000Z", end: "2026-08-06T13:00:00.000Z")
-        // Ended 11:50 — at 12:00 it is inside the 15-min grace: stays.
-        let justEnded = ev("justEnded", start: "2026-08-06T11:00:00.000Z", end: "2026-08-06T11:50:00.000Z")
-        // Ended 11:40 — 15+ min ago: folds.
         let old = ev("old", start: "2026-08-06T11:00:00.000Z", end: "2026-08-06T11:40:00.000Z")
         let river = FamilyDayLogic.river(
-            events: [ongoing, justEnded, old], chores: [], selected: ["a"],
+            events: [ongoing, old], chores: [], selected: ["a"],
             phase: .today, minute: "12:00", timeZone: tz, today: "2026-08-06"
         )
-        #expect(river.flowing.map(\.id).sorted() == ["ev-justEnded", "ev-ongoing"])
-        #expect(river.folded.map(\.id) == ["ev-old"])
+        #expect(river.flowing.map(\.id) == ["ev-ongoing", "ev-old"])
+
+        // hasEnded drives the grey: ended ⇢ true, ongoing/future ⇢ false.
+        #expect(FamilyDayLogic.hasEnded(old, minute: 12 * 60, day: "2026-08-06", timeZone: tz))
+        #expect(!FamilyDayLogic.hasEnded(ongoing, minute: 12 * 60, day: "2026-08-06", timeZone: tz))
+        // Ends exactly now — that's ended.
+        let onTheDot = ev("dot", start: "2026-08-06T11:00:00.000Z", end: "2026-08-06T12:00:00.000Z")
+        #expect(FamilyDayLogic.hasEnded(onTheDot, minute: 12 * 60, day: "2026-08-06", timeZone: tz))
+        // Ended yesterday relative to the shown day.
+        #expect(FamilyDayLogic.hasEnded(old, minute: 0, day: "2026-08-07", timeZone: tz))
+        // Runs into tomorrow — not ended today.
+        let overnight = ev("late", start: "2026-08-06T22:00:00.000Z", end: "2026-08-07T01:00:00.000Z")
+        #expect(!FamilyDayLogic.hasEnded(overnight, minute: 23 * 60, day: "2026-08-06", timeZone: tz))
     }
 
-    @Test func todayFoldsPastTimedEventsButNeverAllDay() {
+    @Test func allDayEventsNeverReadAsEnded() {
         let tz = TimeZone(identifier: "UTC")!
-        let past = MyDayLogic.Event(
-            id: "past", eventId: "e1", calendarId: "c", summary: "past", location: nil,
-            allDay: false, startsAt: "2026-08-06T08:00:00.000Z", endsAt: nil,
-            startDate: nil, endDate: nil, memberIds: nil
-        )
         let allDay = MyDayLogic.Event(
             id: "allday", eventId: "e2", calendarId: "c", summary: "allday", location: nil,
             allDay: true, startsAt: nil, endsAt: nil,
             startDate: "2026-08-06", endDate: "2026-08-07", memberIds: nil
         )
-        let river = FamilyDayLogic.river(
-            events: [past, allDay], chores: [], selected: ["a"],
-            phase: .today, minute: "12:00", timeZone: tz, today: "2026-08-06"
+        // A missing end reads as an instant event ending at its start.
+        let instant = MyDayLogic.Event(
+            id: "instant", eventId: "e1", calendarId: "c", summary: "instant", location: nil,
+            allDay: false, startsAt: "2026-08-06T08:00:00.000Z", endsAt: nil,
+            startDate: nil, endDate: nil, memberIds: nil
         )
-        #expect(river.folded.map(\.id) == ["ev-past"])
-        #expect(river.flowing.map(\.id) == ["ev-allday"])
+        #expect(!FamilyDayLogic.hasEnded(allDay, minute: 23 * 60, day: "2026-08-06", timeZone: tz))
+        #expect(FamilyDayLogic.hasEnded(instant, minute: 12 * 60, day: "2026-08-06", timeZone: tz))
     }
 
     @Test func tintOwnersAndColors() {
