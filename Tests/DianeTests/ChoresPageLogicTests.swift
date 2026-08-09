@@ -400,8 +400,9 @@ struct ChoresPageLogicTests {
         #expect(groups[0].entries.count == 1)
     }
 
-    /// Owner 2026-08-09: History undo — someone else's confirms and names
-    /// the cost; dismissals read as "bring back".
+    /// Owner 2026-08-09: History undo always asks (the status circle is the
+    /// control, like the WebUI) — the prompt names the member and the cost;
+    /// dismissals read as "bring back".
     @Test func historyUndoConfirmsCrossMemberAndNamesTheStars() {
         let names = [me: "Alex", kid: "Maya"]
         let theirs = ChoreHistoryLogic.Entry(
@@ -409,8 +410,6 @@ struct ChoresPageLogicTests {
             occurredAt: "2026-08-06T07:26:00.000Z", dueDate: today, memberId: kid,
             completedByMemberId: kid, starsAwarded: 1, undoable: true
         )
-        #expect(ChoreHistoryLogic.needsUndoConfirm(theirs, me: me))
-        #expect(!ChoreHistoryLogic.needsUndoConfirm(theirs, me: kid))
         #expect(ChoreHistoryLogic.undoPrompt(theirs, names: names) == "Undo Maya's check? They lose 1 ★.")
 
         let dismissed = ChoreHistoryLogic.Entry(

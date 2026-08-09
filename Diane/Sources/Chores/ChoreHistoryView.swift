@@ -60,13 +60,9 @@ enum ChoreHistoryLogic {
         }
     }
 
-    /// Undoing someone else's entry confirms and names them (the day pages'
-    /// rule); your own undoes straight away.
-    static func needsUndoConfirm(_ entry: Entry, me: String) -> Bool {
-        let who = entry.completedByMemberId ?? entry.memberId
-        return who != nil && who != me
-    }
-
+    /// The undo prompt — the status circle always asks first (owner
+    /// 2026-08-09, matching the WebUI; yours included), naming the member
+    /// and the stars at stake.
     static func undoPrompt(_ entry: Entry, names: [String: String]) -> String {
         let who = (entry.completedByMemberId ?? entry.memberId).flatMap { names[$0] } ?? "their"
         if entry.action == .dismissed { return "Bring \(entry.title) back?" }
@@ -231,10 +227,7 @@ struct ChoreHistoryView: View {
     private func row(_ entry: ChoreHistoryLogic.Entry) -> some View {
         let dismissed = entry.action == .dismissed
         return HStack(spacing: 10) {
-            Image(systemName: dismissed ? "slash.circle" : "checkmark")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(dismissed ? Color.secondary : Color.green)
-                .frame(width: 20)
+            statusCircle(entry, dismissed: dismissed)
             if let emoji = entry.emoji { Text(emoji) }
             Text(entry.title)
                 .foregroundStyle(dismissed ? Color.secondary : Color.primary)
@@ -258,19 +251,25 @@ struct ChoreHistoryView: View {
         }
         .grayscale(dismissed ? 1 : 0)
         .listRowInsets(rowInsets)
-        // Undo (owner 2026-08-09): within the repeat frame the entry comes
-        // back to the board; the server says which entries qualify.
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if entry.undoable == true {
-                Button("Undo") {
-                    if ChoreHistoryLogic.needsUndoConfirm(entry, me: context.session.memberID) {
-                        confirmUndo = entry
-                    } else {
-                        Task { await undo(entry, keepStars: false) }
-                    }
-                }
-                .tint(.blue)
+    }
+
+    /// The status circle IS the undo control (owner 2026-08-09, matching the
+    /// WebUI): a checked circle for completed, the slashed one for dismissed.
+    /// Tapping an undoable entry always asks first — yours included; the
+    /// server says which entries still qualify (within the repeat frame).
+    @ViewBuilder
+    private func statusCircle(_ entry: ChoreHistoryLogic.Entry, dismissed: Bool) -> some View {
+        let symbol = Image(systemName: dismissed ? "slash.circle" : "checkmark.circle.fill")
+            .font(.system(size: 26))
+            .foregroundStyle(dismissed ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.green))
+        if entry.undoable == true {
+            Button { confirmUndo = entry } label: {
+                symbol.frame(width: 40, height: 40)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Undo \(entry.title)")
+        } else {
+            symbol.frame(width: 40, height: 40)
         }
     }
 
