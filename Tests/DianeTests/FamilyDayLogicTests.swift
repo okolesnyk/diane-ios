@@ -12,14 +12,15 @@ import Testing
         claimed: String? = nil,
         dueTime: String? = nil,
         late: Bool = false,
-        status: Chore.StatusPayload = .open
+        status: Chore.StatusPayload = .open,
+        completedAt: String? = nil
     ) -> Chore {
         Chore(
             id: id, choreId: "def-\(id)", title: id, emoji: nil, notes: nil,
             starValue: 1, upForGrabs: owner == nil, dueDate: "2026-08-06", dueMode: nil,
             dueTime: dueTime, status: status, late: late,
             assigneeMemberId: owner, claimedByMemberId: claimed,
-            completedByMemberId: nil, completedAt: nil
+            completedByMemberId: nil, completedAt: completedAt
         )
     }
 
@@ -73,6 +74,27 @@ import Testing
         #expect(river.catchUp.map(\.id) == ["late"])
         #expect(river.flowing.map(\.id) == ["ch-done", "ch-timed"])
         #expect(river.noSetTime.map(\.id) == ["doneLoose", "loose"])
+    }
+
+    /// Owner 2026-08-09: a checked late row STAYS in Catch Up as a late ✓ —
+    /// via the server's flag or the completedAt display twin.
+    @Test func lateDoneRowStaysInCatchUp() {
+        let tz = TimeZone(identifier: "UTC")!
+        let river = FamilyDayLogic.river(
+            events: [],
+            chores: [
+                chore(id: "flagged", late: true, status: .completed),
+                chore(id: "twin", status: .completed, completedAt: "2026-08-07T10:00:00.000Z"),
+                chore(id: "on-time", status: .completed, completedAt: "2026-08-06T10:00:00.000Z"),
+            ],
+            selected: ["a"],
+            phase: .today,
+            minute: "12:00",
+            timeZone: tz,
+            today: "2026-08-07"
+        )
+        #expect(river.catchUp.map(\.id) == ["flagged", "twin"])
+        #expect(river.noSetTime.map(\.id) == ["on-time"])
     }
 
     @Test func poolIsImmuneToTheFilterButClaimedRowsAreNot() {

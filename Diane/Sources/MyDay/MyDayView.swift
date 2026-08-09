@@ -166,7 +166,10 @@ struct MyDayView: View {
         let dayChores = phase == .today
             ? loaded.actionableChores
             : loaded.windowChores.filter { $0.dueDate == day }
-        let sections = MyDayLogic.sections(dayChores, me: me, phase: phase, today: clock.today, minute: clock.minute)
+        let sections = MyDayLogic.sections(
+            dayChores, me: me, phase: phase,
+            today: clock.today, minute: clock.minute, timeZone: clock.timeZone
+        )
         let timeline = MyDayLogic.timeline(
             events: TodayLogic.sortedEvents(dayEvents),
             timedChores: sections.timed,

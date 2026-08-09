@@ -17,14 +17,15 @@ import DianeKit
         dueMode: Chore.DueModePayload? = nil,
         dueTime: String? = nil,
         late: Bool = false,
-        status: Chore.StatusPayload = .open
+        status: Chore.StatusPayload = .open,
+        completedAt: String? = nil
     ) -> Chore {
         Chore(
             id: id, choreId: choreId ?? "def-\(id)", title: id, emoji: nil, notes: nil,
             starValue: 2, upForGrabs: owner == nil, dueDate: dueDate, dueMode: dueMode,
             dueTime: dueTime, status: status, late: late,
             assigneeMemberId: owner, claimedByMemberId: claimed,
-            completedByMemberId: nil, completedAt: nil
+            completedByMemberId: nil, completedAt: completedAt
         )
     }
 
@@ -118,6 +119,32 @@ import DianeKit
         let past = MyDayLogic.sections([chore(id: "late", late: true)], me: "me", phase: .past)
         #expect(past.catchUp.isEmpty)
         #expect(past.noSetTime.map(\.id) == ["late"])
+    }
+
+    /// Owner 2026-08-09: a checked late chore STAYS in Catch Up as a late ✓
+    /// instead of jumping back to its schedule section; on-time and early
+    /// checks still gray out where they stand.
+    @Test func lateDoneStaysInCatchUp() {
+        let utc = TimeZone(identifier: "UTC")!
+        let rows = [
+            chore(id: "was-late", dueDate: "2026-08-04", status: .completed,
+                  completedAt: "2026-08-05T10:00:00.000Z"),
+            chore(id: "on-time", status: .completed, completedAt: "2026-08-05T09:00:00.000Z"),
+            chore(id: "t-late", dueTime: "08:00", status: .completed,
+                  completedAt: "2026-08-05T08:20:00.000Z"),
+            chore(id: "t-ok", dueTime: "08:00", status: .completed,
+                  completedAt: "2026-08-05T08:10:00.000Z"),
+        ]
+        let out = MyDayLogic.sections(
+            rows, me: "me", phase: .today,
+            today: "2026-08-05", minute: "12:00", timeZone: utc
+        )
+        #expect(out.catchUp.map(\.id) == ["was-late", "t-late"])
+        #expect(out.noSetTime.map(\.id) == ["on-time"])
+        #expect(out.timed.map(\.id) == ["t-ok"])
+        // The server's flag alone suffices once the api carries it.
+        let flagged = chore(id: "flagged", dueDate: "2026-08-04", late: true, status: .completed)
+        #expect(MyDayLogic.lateWhenDone(flagged, timeZone: utc))
     }
 
     @Test func timelineMergesAndOrdersEventsWithTimedChores() {

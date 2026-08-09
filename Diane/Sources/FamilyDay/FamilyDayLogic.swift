@@ -129,10 +129,13 @@ enum FamilyDayLogic {
                 continue
             }
             guard visible(row, selected: selected) else { continue }
+            // Late-done rows stay too (owner 2026-08-09): a checked catch-up
+            // reads as "the catch-up got done", not a fresh on-time ✓.
             let rowLate = row.occurrences.contains {
                 MyDayLogic.effectivelyLate($0, today: today ?? "", minute: minute)
+                    || MyDayLogic.lateWhenDone($0, timeZone: timeZone)
             }
-            if phase == .today && rowLate && !row.completed {
+            if phase == .today && rowLate {
                 out.catchUp.append(row)
             } else if row.dueTime != nil {
                 out.flowing.append(.chores(row))

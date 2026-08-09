@@ -232,16 +232,39 @@ enum MyDayLogic {
         return now >= due + lateGraceMinutes
     }
 
+    /// Was this ✓ a catch-up — checked after its due day, or past its own-day
+    /// time + grace? A checked late chore STAYS in Catch Up as a truthful
+    /// late-done (owner 2026-08-09) instead of jumping to its schedule
+    /// section. Display twin of the server rule (done rows now carry `late`);
+    /// the local computation also covers an api that predates it.
+    static func lateWhenDone(_ chore: Chore, timeZone: TimeZone) -> Bool {
+        guard chore.status == .completed else { return false }
+        if chore.late { return true }
+        guard let dueDate = chore.dueDate,
+              let completedAt = chore.completedAt,
+              let instant = TodayLogic.parseInstant(completedAt)
+        else { return false }
+        let doneDay = TodayLogic.dateString(for: instant, timeZone: timeZone)
+        if dueDate < doneDay { return true }
+        guard dueDate == doneDay,
+              let time = chore.dueTime, let due = TodayLogic.minutes(time)
+        else { return false }
+        return TodayLogic.clockMinutes(of: instant, timeZone: timeZone) >= due + lateGraceMinutes
+    }
+
     static func sections(
         _ occurrences: [Chore],
         me: String,
         phase: DayPhase,
         today: String = "",
-        minute: String = ""
+        minute: String = "",
+        timeZone: TimeZone = .current
     ) -> Sections {
         var out = Sections()
         for chore in occurrences where isMine(chore, me: me) {
-            if phase == .today && effectivelyLate(chore, today: today, minute: minute) {
+            if phase == .today,
+               effectivelyLate(chore, today: today, minute: minute)
+                   || lateWhenDone(chore, timeZone: timeZone) {
                 out.catchUp.append(chore)
             } else if chore.dueTime != nil {
                 out.timed.append(chore)
