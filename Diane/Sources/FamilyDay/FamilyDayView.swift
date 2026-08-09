@@ -89,22 +89,20 @@ struct FamilyDayView: View {
                     )
                 }
             }
-            .confirmationDialog(
+            .alert(
                 TodayLogic.dismissPrompt(confirmDismiss?.title ?? ""),
-                isPresented: Binding(get: { confirmDismiss != nil }, set: { if !$0 { confirmDismiss = nil } }),
-                titleVisibility: .visible
+                isPresented: Binding(get: { confirmDismiss != nil }, set: { if !$0 { confirmDismiss = nil } })
             ) {
                 Button("Dismiss", role: .destructive) {
                     if let chore = confirmDismiss { Task { await act("dismiss", on: chore) } }
                     confirmDismiss = nil
                 }
             } message: {
-                Text("It goes away for good — no stars, no trace.")
+                Text("No stars for it — and you can bring it back from History.")
             }
-            .confirmationDialog(
+            .alert(
                 uncheckPrompt,
-                isPresented: Binding(get: { confirmUncheck != nil }, set: { if !$0 { confirmUncheck = nil } }),
-                titleVisibility: .visible
+                isPresented: Binding(get: { confirmUncheck != nil }, set: { if !$0 { confirmUncheck = nil } })
             ) {
                 Button("Undo the check", role: .destructive) {
                     if let row = confirmUncheck { Task { await act("uncomplete", on: row.lead) } }
@@ -415,9 +413,8 @@ struct FamilyDayView: View {
                 .contentShape(Rectangle())
             }
             whoBadge(owners: row.owners)
-            if row.starValue > 0 {
-                Text("★ \(row.starValue)").font(.caption.weight(.semibold)).foregroundStyle(.orange)
-            }
+            // No star values on this page (owner 2026-08-09) — the cost
+            // lives in the chore detail and the Chores module.
         }
         // Done = the whole row goes gray — circle, avatar, star, wash
         // (owner 2026-08-08).
@@ -438,11 +435,6 @@ struct FamilyDayView: View {
 
     private func poolRow(_ row: ChoresPageLogic.Row) -> some View {
         HStack(spacing: 10) {
-            Circle()
-                .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-                .foregroundStyle(.tertiary)
-                .frame(width: 26, height: 26)
-                .accessibilityHidden(true)
             circleButton(row, late: false)
             DetailRow(route: .chore(row.lead), open: open) {
                 HStack {
@@ -456,9 +448,6 @@ struct FamilyDayView: View {
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
-            }
-            if row.starValue > 0 {
-                Text("★ \(row.starValue)").font(.subheadline.weight(.bold)).foregroundStyle(.orange)
             }
         }
         .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
@@ -487,7 +476,10 @@ struct FamilyDayView: View {
             if inFlight.contains(row.lead.id) {
                 ProgressView().frame(width: 44, height: 44)
             } else {
-                Image(systemName: row.completed ? "checkmark.circle.fill" : "circle")
+                // The doc's pool language: an unowned chore's check circle
+                // is ITSELF dashed — dashed but live, tap to do it.
+                Image(systemName: row.completed ? "checkmark.circle.fill"
+                    : row.isPool ? "circle.dashed" : "circle")
                     .font(.system(size: 26))
                     .symbolRenderingMode(.hierarchical)
                     .foregroundStyle(row.completed ? .green : late ? .red : .secondary)

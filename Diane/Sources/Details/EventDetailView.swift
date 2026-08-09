@@ -215,10 +215,9 @@ struct EventDetailView: View {
             .alert(errorMessage ?? "Something went wrong.", isPresented: errorShown) {
                 Button("OK", role: .cancel) {}
             }
-            .confirmationDialog(
+            .alert(
                 "Delete this event?",
-                isPresented: $confirmingDelete,
-                titleVisibility: .visible
+                isPresented: $confirmingDelete
             ) {
                 Button("Yes, delete", role: .destructive) {
                     Task { await deleteEvent() }

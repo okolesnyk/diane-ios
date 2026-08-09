@@ -99,24 +99,22 @@ struct ChoresPageView: View {
                 onSaved: { Task { await load() } }
             )
         }
-        .confirmationDialog(
+        .alert(
             TodayLogic.dismissPrompt(confirmDismiss?.title ?? ""),
-            isPresented: Binding(get: { confirmDismiss != nil }, set: { if !$0 { confirmDismiss = nil } }),
-            titleVisibility: .visible
+            isPresented: Binding(get: { confirmDismiss != nil }, set: { if !$0 { confirmDismiss = nil } })
         ) {
             Button("Dismiss", role: .destructive) {
                 if let row = confirmDismiss { Task { await act(.dismiss, on: row) } }
                 confirmDismiss = nil
             }
         } message: {
-            Text("It goes away for good — no stars, no trace.")
+            Text("No stars for it — and you can bring it back from History.")
         }
         // Your own check reverts instantly; someone else's asks first and
         // names the cost (owner approved, rev 7).
-        .confirmationDialog(
+        .alert(
             confirmUndo.map { ChoresPageLogic.undoPrompt($0, names: memberNames) } ?? "",
-            isPresented: Binding(get: { confirmUndo != nil }, set: { if !$0 { confirmUndo = nil } }),
-            titleVisibility: .visible
+            isPresented: Binding(get: { confirmUndo != nil }, set: { if !$0 { confirmUndo = nil } })
         ) {
             Button("Undo check", role: .destructive) {
                 if let row = confirmUndo { Task { await act(.uncomplete, on: row) } }

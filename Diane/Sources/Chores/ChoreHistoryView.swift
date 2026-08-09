@@ -60,14 +60,24 @@ enum ChoreHistoryLogic {
         }
     }
 
-    /// "Maya · 7:26" — who, and when they did it.
-    static func attribution(_ entry: Entry, names: [String: String], timeZone: TimeZone) -> String {
-        let who = (entry.completedByMemberId ?? entry.memberId).flatMap { names[$0] }
-        let time = TodayLogic.timeLabel(entry.occurredAt, timeZone: timeZone)
-        if entry.action == .dismissed {
-            return who.map { "dismissed · \($0)" } ?? "dismissed"
-        }
-        return [who, time].compactMap { $0 }.joined(separator: " · ")
+    /// Undoing someone else's entry confirms and names them (the day pages'
+    /// rule); your own undoes straight away.
+    static func needsUndoConfirm(_ entry: Entry, me: String) -> Bool {
+        let who = entry.completedByMemberId ?? entry.memberId
+        return who != nil && who != me
+    }
+
+    static func undoPrompt(_ entry: Entry, names: [String: String]) -> String {
+        let who = (entry.completedByMemberId ?? entry.memberId).flatMap { names[$0] } ?? "their"
+        if entry.action == .dismissed { return "Bring \(entry.title) back?" }
+        return entry.starsAwarded > 0
+            ? "Undo \(who)'s check? They lose \(entry.starsAwarded) ★."
+            : "Undo \(who)'s check?"
+    }
+
+    /// Who acted: the completer, else the owner (nil = a pool dismissal).
+    static func actor(_ entry: Entry) -> String? {
+        entry.completedByMemberId ?? entry.memberId
     }
 }
 
@@ -82,6 +92,11 @@ struct ChoreHistoryView: View {
     @State private var period: ChoreHistoryLogic.Period = .week
     @State private var data: Loadable<Loaded> = .loading
     @State private var loadingMore = false
+    @State private var confirmUndo: ChoreHistoryLogic.Entry?
+    /// The 409 fallback: undo again with every star award left standing.
+    @State private var confirmKeepStars: ChoreHistoryLogic.Entry?
+    @State private var actionError: String?
+    @State private var undoing: Set<String> = []
 
     private let rowInsets = EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
     /// One screenful and change. History is the one list here that grows
@@ -115,6 +130,38 @@ struct ChoreHistoryView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task(id: "\(signals.version(of: [.chores, .members]))|\(clock.today)|\(period.rawValue)") {
             await load()
+        }
+        .alert(
+            confirmUndo.map { ChoreHistoryLogic.undoPrompt($0, names: memberNames) } ?? "",
+            isPresented: Binding(get: { confirmUndo != nil }, set: { if !$0 { confirmUndo = nil } })
+        ) {
+            Button("Undo", role: .destructive) {
+                if let entry = confirmUndo { Task { await undo(entry, keepStars: false) } }
+                confirmUndo = nil
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        // The owner's rule: not enough stars to take back → ask, and yes
+        // keeps EVERYONE's stars untouched while the chore still returns.
+        .alert(
+            "Not enough stars to take back.",
+            isPresented: Binding(get: { confirmKeepStars != nil }, set: { if !$0 { confirmKeepStars = nil } })
+        ) {
+            Button("Undo, keep stars", role: .destructive) {
+                if let entry = confirmKeepStars { Task { await undo(entry, keepStars: true) } }
+                confirmKeepStars = nil
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Someone already spent them. Undo without changing any balances?")
+        }
+        .alert(
+            "That didn't work",
+            isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(actionError ?? "")
         }
     }
 
@@ -192,16 +239,67 @@ struct ChoreHistoryView: View {
             Text(entry.title)
                 .foregroundStyle(dismissed ? Color.secondary : Color.primary)
             Spacer(minLength: 8)
-            Text(ChoreHistoryLogic.attribution(entry, names: memberNames, timeZone: clock.timeZone))
+            Text(TodayLogic.timeLabel(entry.occurredAt, timeZone: clock.timeZone) ?? "")
                 .font(.caption)
+                .monospacedDigit()
                 .foregroundStyle(.tertiary)
+            // The member is a circle, like every other page (owner
+            // 2026-08-09) — never a typed name.
+            if let member = ChoreHistoryLogic.actor(entry).flatMap({ id in
+                members.first(where: { $0.id == id })
+            }) {
+                MemberAvatarView(name: member.name, colorHex: member.color, avatar: nil, size: 22)
+            }
             if entry.starsAwarded > 0 {
                 Text("+\(entry.starsAwarded) ★")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
             }
         }
+        .grayscale(dismissed ? 1 : 0)
         .listRowInsets(rowInsets)
+        // Undo (owner 2026-08-09): within the repeat frame the entry comes
+        // back to the board; the server says which entries qualify.
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if entry.undoable == true {
+                Button("Undo") {
+                    if ChoreHistoryLogic.needsUndoConfirm(entry, me: context.session.memberID) {
+                        confirmUndo = entry
+                    } else {
+                        Task { await undo(entry, keepStars: false) }
+                    }
+                }
+                .tint(.blue)
+            }
+        }
+    }
+
+    private func undo(_ entry: ChoreHistoryLogic.Entry, keepStars: Bool) async {
+        guard undoing.insert(entry.id).inserted else { return }
+        defer { undoing.remove(entry.id) }
+        do {
+            let output = try await context.client.api.undoChoreHistory(
+                .init(path: .init(id: entry.id), body: .json(.init(keepStars: keepStars)))
+            )
+            switch output {
+            case .ok:
+                await load()  // the entry (or its whole shared group) is gone
+            case .conflict:
+                confirmKeepStars = entry  // spent stars — ask the owner's question
+            case .unprocessableContent:
+                actionError = "That one can't be undone any more — its next round has already started."
+                await load()
+            case .unauthorized:
+                appState.handleUnauthorized()
+            case .notFound:
+                await load()  // undone elsewhere already
+            default:
+                actionError = "Check the connection and try again."
+            }
+        } catch {
+            guard !isTaskCancellation(error) else { return }
+            actionError = "Check the connection and try again."
+        }
     }
 
     private var memberNames: [String: String] {

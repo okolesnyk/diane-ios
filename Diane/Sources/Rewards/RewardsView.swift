@@ -101,10 +101,9 @@ struct RewardsView: View {
                 .refreshable { await load() }
         }
         .sensoryFeedback(.success, trigger: celebrationCount)
-        .confirmationDialog(
+        .alert(
             confirmingReward.map { "Redeem \($0.title) for ★\($0.costStars)?" } ?? "",
-            isPresented: confirmationShown,
-            titleVisibility: .visible
+            isPresented: confirmationShown
         ) {
             if let reward = confirmingReward {
                 Button("Redeem") { Task { await redeem(reward) } }

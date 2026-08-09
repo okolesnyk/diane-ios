@@ -101,17 +101,16 @@ struct MyDayView: View {
                     )
                 }
             }
-            .confirmationDialog(
+            .alert(
                 TodayLogic.dismissPrompt(confirmDismiss?.title ?? ""),
-                isPresented: Binding(get: { confirmDismiss != nil }, set: { if !$0 { confirmDismiss = nil } }),
-                titleVisibility: .visible
+                isPresented: Binding(get: { confirmDismiss != nil }, set: { if !$0 { confirmDismiss = nil } })
             ) {
                 Button("Dismiss", role: .destructive) {
                     if let chore = confirmDismiss { Task { await act("dismiss", on: chore) } }
                     confirmDismiss = nil
                 }
             } message: {
-                Text("It goes away for good — no stars, no trace.")
+                Text("No stars for it — and you can bring it back from History.")
             }
             .alert("That didn't work", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
                 Button("OK", role: .cancel) {}

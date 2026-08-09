@@ -400,6 +400,27 @@ struct ChoresPageLogicTests {
         #expect(groups[0].entries.count == 1)
     }
 
+    /// Owner 2026-08-09: History undo — someone else's confirms and names
+    /// the cost; dismissals read as "bring back".
+    @Test func historyUndoConfirmsCrossMemberAndNamesTheStars() {
+        let names = [me: "Alex", kid: "Maya"]
+        let theirs = ChoreHistoryLogic.Entry(
+            id: "1", choreId: "cat", title: "Feed the cat", emoji: nil, action: .completed,
+            occurredAt: "2026-08-06T07:26:00.000Z", dueDate: today, memberId: kid,
+            completedByMemberId: kid, starsAwarded: 1, undoable: true
+        )
+        #expect(ChoreHistoryLogic.needsUndoConfirm(theirs, me: me))
+        #expect(!ChoreHistoryLogic.needsUndoConfirm(theirs, me: kid))
+        #expect(ChoreHistoryLogic.undoPrompt(theirs, names: names) == "Undo Maya's check? They lose 1 ★.")
+
+        let dismissed = ChoreHistoryLogic.Entry(
+            id: "2", choreId: "porch", title: "Tidy the porch", emoji: nil, action: .dismissed,
+            occurredAt: "2026-08-06T07:26:00.000Z", dueDate: today, memberId: me,
+            completedByMemberId: nil, starsAwarded: 0, undoable: true
+        )
+        #expect(ChoreHistoryLogic.undoPrompt(dismissed, names: names) == "Bring Tidy the porch back?")
+    }
+
     @Test func historyFilterFollowsTheSharedChips() {
         let entry = ChoreHistoryLogic.Entry(
             id: "1", choreId: "cat", title: "Feed the cat", emoji: nil, action: .completed,

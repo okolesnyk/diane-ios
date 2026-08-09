@@ -1556,6 +1556,8 @@ components:
           nullable: true
         starsAwarded:
           type: integer
+        undoable:
+          type: boolean
       required:
         - id
         - choreId
@@ -1567,6 +1569,21 @@ components:
         - memberId
         - completedByMemberId
         - starsAwarded
+    ChoreHistoryUndoResult:
+      type: object
+      properties:
+        entriesRemoved:
+          type: integer
+        starsReversed:
+          type: boolean
+      required:
+        - entriesRemoved
+        - starsReversed
+    ChoreHistoryUndoBody:
+      type: object
+      properties:
+        keepStars:
+          type: boolean
     RoutineBoard:
       type: object
       properties:
@@ -4078,6 +4095,58 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: from must not be after to (invalid_range)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/chore-history/{id}/undo:
+    post:
+      operationId: undoChoreHistory
+      summary: Undo a completion or dismissal — the chore returns to the board
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChoreHistoryUndoBody"
+      responses:
+        "200":
+          description: Undone. A shared chore reverts every member in one transaction
+            (History shows one entry per member; any of them undoes the group).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChoreHistoryUndoResult"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: No such history entry in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: Reversing the stars would drive a balance negative
+            (insufficient_stars) — retry with keepStars to undo without touching
+            balances
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: The repeat frame has closed or a later resolution exists
+            (not_undoable) — recurring chores undo only until the next
+            occurrence has arrived
           content:
             application/json:
               schema:

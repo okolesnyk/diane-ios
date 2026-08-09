@@ -313,21 +313,19 @@ struct RoutineFormView: View {
                     }
                 }
                 // R4 Confirm before throwing away what's been typed.
-                .confirmationDialog(
-                    "Discard changes?",
-                    isPresented: $confirmingDiscard,
-                    titleVisibility: .visible
-                ) {
+                // .alert, not confirmationDialog: iOS 26 anchors dialogs
+                // to their source with a pointer bubble — the owner wants a
+                // plain centered modal (2026-08-09).
+                .alert("Discard changes?", isPresented: $confirmingDiscard) {
                     Button("Discard changes", role: .destructive) { dismiss() }
                     Button("Keep editing", role: .cancel) {}
                 }
         }
         .interactiveDismissDisabled(saving || isDirty)  // R4
         .task { await prepare() }
-        .confirmationDialog(
+        .alert(
             "Delete this routine?",
-            isPresented: $confirmingDelete,
-            titleVisibility: .visible
+            isPresented: $confirmingDelete
         ) {
             Button("Delete for good", role: .destructive) {
                 Task { await deleteRoutine() }
