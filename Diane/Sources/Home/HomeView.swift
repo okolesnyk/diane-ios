@@ -4,8 +4,9 @@ import SwiftUI
 /// The tile-grid launcher — renamed Home (owner 2026-08-08): every module
 /// the household has ON, plus grayed tiles for what the future lands here.
 /// Off modules disappear entirely — the switchboard is "what the family
-/// sees, on every client". Long-press pins a module to the fourth tab
-/// (device-local).
+/// sees, on every client". Long-press pins a module to the bottom menu
+/// (device-local): replace the main Calendar slot, or add/remove one of
+/// the up-to-two extra tabs (owner 2026-08-10).
 ///
 /// Opening a tile NEVER shows a back button (owner 2026-08-08): a module
 /// page always wears the root chrome — title left, avatar right — exactly
@@ -16,12 +17,12 @@ struct HomeView: View {
     let context: SignedInContext
     /// Owned by RootTabView so re-tapping the Home tab can pop to the grid.
     @Binding var path: NavigationPath
-    /// What the fourth tab currently shows — its tile switches tabs.
-    let pinnedTab: DianeModule
-    let selectPinnedTab: () -> Void
+    /// What the module tabs currently show — their tiles switch tabs.
+    let pinnedModules: [DianeModule]
+    let selectPinnedTab: (DianeModule) -> Void
 
     @Environment(HouseholdClock.self) private var clock
-    @Environment(FourthTabStore.self) private var fourthTab
+    @Environment(PinnedTabsStore.self) private var pinnedTabs
 
     private let columns = [GridItem(.adaptive(minimum: 150), spacing: 14)]
 
@@ -33,8 +34,8 @@ struct HomeView: View {
                     LazyVGrid(columns: columns, spacing: 14) {
                         ForEach(NavigationLogic.enabledModules(clock.modules)) { module in
                             Button {
-                                if module == pinnedTab {
-                                    selectPinnedTab()
+                                if pinnedModules.contains(module) {
+                                    selectPinnedTab(module)
                                 } else {
                                     path.append(module)
                                 }
@@ -44,15 +45,31 @@ struct HomeView: View {
                             .buttonStyle(.plain)
                             .contextMenu {
                                 Button {
-                                    fourthTab.pin(module)
+                                    pinnedTabs.pin(module)
                                 } label: {
                                     Label(
-                                        fourthTab.pinned == module
+                                        pinnedTabs.pinned.first == module
                                             ? "Pinned to the tab bar" : "Pin to the tab bar",
                                         systemImage: "pin"
                                     )
                                 }
-                                .disabled(fourthTab.pinned == module)
+                                .disabled(pinnedTabs.pinned.first == module)
+                                // Up to two EXTRA bottom items (owner
+                                // 2026-08-10) — add here, remove here.
+                                if pinnedTabs.pinned.dropFirst().contains(module) {
+                                    Button {
+                                        pinnedTabs.remove(module)
+                                    } label: {
+                                        Label("Remove from the tab bar", systemImage: "pin.slash")
+                                    }
+                                } else if !pinnedTabs.pinned.contains(module),
+                                          pinnedTabs.pinned.count < PinnedTabsStore.maxSlots {
+                                    Button {
+                                        pinnedTabs.add(module)
+                                    } label: {
+                                        Label("Add to the tab bar", systemImage: "plus.circle")
+                                    }
+                                }
                             }
                         }
                         ForEach(FutureModule.allCases) { future in

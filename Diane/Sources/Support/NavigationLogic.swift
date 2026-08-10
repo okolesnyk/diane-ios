@@ -93,43 +93,78 @@ enum NavigationLogic {
         return formatter.string(from: date)
     }
 
-    /// What the fourth tab renders: the pinned module while its switch is on,
-    /// else Calendar. The fallback is CLIENT logic by design (owner rule
-    /// 2026-08-05): the pin itself is device-local and the server never
-    /// sweeps it, so a client whose pin points at an off module steps back
-    /// to the spine on its own — without forgetting the pin, which revives
-    /// when the module returns.
-    static func effectiveFourthTab(pinned: DianeModule, modules: ModuleSwitchboard) -> DianeModule {
-        pinned.isOn(modules) ? pinned : .calendar
+    /// What the pinned tabs render (owner 2026-08-10: the Calendar slot is
+    /// changeable and up to two more can join). Each pin shows while its
+    /// module is on; the MAIN slot falls back to Calendar when its module is
+    /// off (owner rule 2026-08-05), optional slots simply sit out. The
+    /// fallback is CLIENT logic by design: pins are device-local and the
+    /// server never sweeps them — an off module's pin revives on return.
+    static func effectivePinnedTabs(pinned: [DianeModule], modules: ModuleSwitchboard) -> [DianeModule] {
+        let main = pinned.first ?? .calendar
+        var out = [main.isOn(modules) ? main : .calendar]
+        for module in pinned.dropFirst() where module.isOn(modules) && !out.contains(module) {
+            out.append(module)
+        }
+        return Array(out.prefix(PinnedTabsStore.maxSlots))
     }
 }
 
-/// The device-local fourth-tab pin, scoped per member so a shared phone
-/// never leaks one member's layout onto another's sign-in.
+/// The device-local pinned module tabs, scoped per member so a shared phone
+/// never leaks one member's layout onto another's sign-in. Slot 1 is the
+/// always-present changeable tab (default Calendar); slots 2–3 are the
+/// optional extras (owner 2026-08-10).
 @MainActor
 @Observable
-final class FourthTabStore {
+final class PinnedTabsStore {
+    nonisolated static let maxSlots = 3
     private let key: String
     @ObservationIgnored private let defaults: UserDefaults
-    private(set) var pinned: DianeModule
+    private(set) var pinned: [DianeModule]
 
     init(memberID: String, defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        key = "fourthTab.\(memberID)"
-        pinned = DianeModule(rawValue: defaults.string(forKey: key) ?? "") ?? .calendar
+        key = "pinnedTabs.\(memberID)"
+        // The pre-extras single pin reads as slot 1.
+        let stored = defaults.string(forKey: key)
+            ?? defaults.string(forKey: "fourthTab.\(memberID)")
+            ?? ""
+        var modules: [DianeModule] = []
+        for raw in stored.split(separator: ",") {
+            if let module = DianeModule(rawValue: String(raw)), !modules.contains(module) {
+                modules.append(module)
+            }
+        }
+        pinned = modules.isEmpty ? [.calendar] : Array(modules.prefix(Self.maxSlots))
         #if DEBUG
         // Screenshot hook, twin of RootTabView's -uiTab: pinning is a
         // long-press and simctl cannot tap. Never compiled into release.
         if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-uiModule"),
            index + 1 < ProcessInfo.processInfo.arguments.count,
            let module = DianeModule(rawValue: ProcessInfo.processInfo.arguments[index + 1]) {
-            pinned = module
+            pinned = [module]
         }
         #endif
     }
 
+    /// Replace the main slot; the module leaves any extra slot it held.
     func pin(_ module: DianeModule) {
-        pinned = module
-        defaults.set(module.rawValue, forKey: key)
+        save([module] + pinned.dropFirst().filter { $0 != module })
+    }
+
+    /// Add an optional extra tab (the 4th/5th bottom item).
+    func add(_ module: DianeModule) {
+        guard !pinned.contains(module), pinned.count < Self.maxSlots else { return }
+        save(pinned + [module])
+    }
+
+    /// Drop an extra slot — the main slot is replaced, never removed.
+    func remove(_ module: DianeModule) {
+        guard pinned.dropFirst().contains(module) else { return }
+        save(pinned.filter { $0 != module })
+    }
+
+    private func save(_ modules: [DianeModule]) {
+        pinned = modules
+        defaults.set(modules.map(\.rawValue).joined(separator: ","), forKey: key)
     }
 }
