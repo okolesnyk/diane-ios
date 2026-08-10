@@ -45,18 +45,18 @@ enum FormPatch {
 // MARK: - Chore form logic (nonisolated, tested in FormsLogicTests)
 
 enum ChoreFormLogic {
-    /// The four schedule shapes, mirroring the web segmented control and the
-    /// server's one-shape rule (packages/chores shapeOf).
+    /// The three schedule shapes. "On a day" is retired (owner 2026-08-10):
+    /// every dated chore is simply DUE a date — visible from creation, late
+    /// past its day — so the form writes dueMode "by" for all of them.
     enum Shape: String, CaseIterable, Identifiable {
-        case anytime, onDay, byDate, repeats
+        case anytime, byDate, repeats
 
         var id: String { rawValue }
 
         var label: String {
             switch self {
             case .anytime: "Anytime"
-            case .onDay: "On a day"
-            case .byDate: "By a date"
+            case .byDate: "Due date"
             case .repeats: "Repeats"
             }
         }
@@ -96,7 +96,7 @@ enum ChoreFormLogic {
         var stars = 1
         var assigneeIds: Set<String> = []
         var shape: Shape = .anytime
-        /// The date of the 'onDay' (fixed) and 'byDate' (deadline) shapes.
+        /// The 'byDate' shape's due date.
         var dueDate = ""
         /// Dated shapes only — the server 422s dueTime on anytime.
         var hasDueTime = false
@@ -124,7 +124,9 @@ enum ChoreFormLogic {
         if chore.recurrence != nil {
             state.shape = .repeats
         } else if chore.dueDate != nil {
-            state.shape = chore.dueMode == .by ? .byDate : .onDay
+            // Legacy "on a day" chores read as Due date too; saving from
+            // here writes them back as "by" — the gradual migration.
+            state.shape = .byDate
         } else {
             state.shape = .anytime
         }
@@ -158,7 +160,7 @@ enum ChoreFormLogic {
             return "Give the chore a title."
         }
         if !(0...100).contains(state.stars) { return "Stars must be between 0 and 100." }
-        if state.shape == .onDay || state.shape == .byDate, state.dueDate.isEmpty {
+        if state.shape == .byDate, state.dueDate.isEmpty {
             return "Pick a date."
         }
         if state.shape == .repeats {
@@ -200,9 +202,6 @@ enum ChoreFormLogic {
         switch state.shape {
         case .anytime:
             break
-        case .onDay:
-            body.dueDate = state.dueDate
-            body.dueTime = dueTimeWire(state)
         case .byDate:
             body.dueDate = state.dueDate
             body.dueMode = .by
@@ -232,7 +231,7 @@ enum ChoreFormLogic {
     /// null for the unselected shapes' fields — because the server validates
     /// the RESULTING chore of existing row + patch (web buildChoreUpdateBody).
     static func patchBody(_ state: State) -> ChorePatchBody {
-        let dated = state.shape == .onDay || state.shape == .byDate
+        let dated = state.shape == .byDate
         let notes = state.notes.trimmingCharacters(in: .whitespacesAndNewlines)
         let emoji = state.emoji.trimmingCharacters(in: .whitespaces)
         return ChorePatchBody(
@@ -520,9 +519,9 @@ struct ChoreFormView: View {
             .pickerStyle(.segmented)
             .listRowInsets(FormDensity.rowInsets)
 
-            if state.shape == .onDay || state.shape == .byDate {
+            if state.shape == .byDate {
                 DatePicker(
-                    state.shape == .byDate ? "Due by" : "Date",
+                    "Due",
                     selection: FormDates.dayBinding($state.dueDate, timeZone: clock.timeZone),
                     displayedComponents: .date
                 )
@@ -545,10 +544,8 @@ struct ChoreFormView: View {
         } header: {
             Text("Schedule")
         } footer: {
-            switch state.shape {
-            case .onDay: Text("Shows on that day; can't be checked off before then.")
-            case .byDate: Text("Do it any time from now — it's late if not done by this day.")
-            default: EmptyView()
+            if state.shape == .byDate {
+                Text("On the board from now — late if not done by this day.")
             }
         }
     }
@@ -599,7 +596,7 @@ struct ChoreFormView: View {
         case .create:
             state = ChoreFormLogic.State()
             if let defaultDate {
-                state.shape = .onDay
+                state.shape = .byDate
                 state.dueDate = defaultDate
             }
             fillEmptyDates()

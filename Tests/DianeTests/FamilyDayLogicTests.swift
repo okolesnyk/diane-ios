@@ -10,6 +10,7 @@ import Testing
         id: String = "c1",
         owner: String? = "a",
         claimed: String? = nil,
+        dueDate: String? = "2026-08-06",
         dueTime: String? = nil,
         late: Bool = false,
         status: Chore.StatusPayload = .open,
@@ -17,7 +18,7 @@ import Testing
     ) -> Chore {
         Chore(
             id: id, choreId: "def-\(id)", title: id, emoji: nil, notes: nil,
-            starValue: 1, upForGrabs: owner == nil, dueDate: "2026-08-06", dueMode: nil,
+            starValue: 1, upForGrabs: owner == nil, dueDate: dueDate, dueMode: nil,
             dueTime: dueTime, status: status, late: late,
             assigneeMemberId: owner, claimedByMemberId: claimed,
             completedByMemberId: nil, completedAt: completedAt
@@ -50,7 +51,7 @@ import Testing
         #expect(set == Set(all))
     }
 
-    @Test func riverPartitionsThePool_CatchUp_AndFlow() {
+    @Test func riverPartitionsCatchUp_Flow_AndDueToday() {
         let tz = TimeZone(identifier: "UTC")!
         let river = FamilyDayLogic.river(
             events: [],
@@ -59,7 +60,7 @@ import Testing
                 chore(id: "late", late: true),
                 // Done chores stay IN PLACE, crossed and grey (owner
                 // 2026-08-07) — a timed one in the flow, an untimed one on
-                // the No set time shelf. Nothing folds away.
+                // the Due today shelf. Nothing folds away.
                 chore(id: "done", dueTime: "09:00", status: .completed),
                 chore(id: "doneLoose", status: .completed),
                 chore(id: "timed", dueTime: "18:00"),
@@ -68,12 +69,72 @@ import Testing
             selected: ["a"],
             phase: .today,
             minute: "12:00",
-            timeZone: tz
+            timeZone: tz,
+            today: "2026-08-06",
+            day: "2026-08-06"
         )
-        #expect(river.pool.map(\.id) == ["pool"])
         #expect(river.catchUp.map(\.id) == ["late"])
         #expect(river.flowing.map(\.id) == ["ch-done", "ch-timed"])
-        #expect(river.noSetTime.map(\.id) == ["doneLoose", "loose"])
+        // The dated pool row sits at the BOTTOM of Due today (owner
+        // 2026-08-09 — the standalone Up for grabs shelf is gone).
+        #expect(river.dueToday.map(\.id) == ["doneLoose", "loose", "pool"])
+    }
+
+    /// Owner 2026-08-09: the pool spreads by date and time — late is
+    /// everyone's debt, timed joins the timeline, dated lands on Due today,
+    /// undated at the bottom of Anytime — and stays filter-immune throughout.
+    @Test func poolSpreadsByDateAndTime() {
+        let tz = TimeZone(identifier: "UTC")!
+        let chores = [
+            chore(id: "own-late", late: true),
+            chore(id: "pool-late", owner: nil, late: true),
+            chore(id: "pool-timed", owner: nil, dueTime: "17:00"),
+            chore(id: "own-dated"),
+            chore(id: "pool-dated", owner: nil),
+            chore(id: "own-any", dueDate: nil),
+            chore(id: "pool-any", owner: nil, dueDate: nil),
+        ]
+        // Tomorrow reads the window; Later reads the live board (owner
+        // 2026-08-10), pool last in both.
+        let windowRows = [
+            chore(id: "own-tmrw", dueDate: "2026-08-07"),
+            chore(id: "pool-tmrw", owner: nil, dueDate: "2026-08-07"),
+        ]
+        let boardRows = chores + windowRows + [
+            chore(id: "pool-later", owner: nil, dueDate: "2026-08-09"),
+            chore(id: "own-later", dueDate: "2026-08-08"),
+            // Beyond the 30-day horizon (owner 2026-08-10): the Chores
+            // page owns it — the shelf must NOT.
+            chore(id: "far", dueDate: "2026-09-10"),
+        ]
+        let river = FamilyDayLogic.river(
+            events: [], chores: chores, window: windowRows, actionable: boardRows,
+            selected: ["a"],
+            phase: .today, minute: "12:00", timeZone: tz,
+            today: "2026-08-06", day: "2026-08-06"
+        )
+        #expect(river.catchUp.map(\.id) == ["own-late", "pool-late"])
+        #expect(river.flowing.map(\.id) == ["ch-pool-timed"])
+        #expect(river.dueToday.map(\.id) == ["own-dated", "pool-dated"])
+        #expect(river.anytime.map(\.id) == ["own-any", "pool-any"])
+        #expect(river.tomorrow.map(\.id) == ["own-tmrw", "pool-tmrw"])
+        // The 30-day shelf sorts by date, pool sinking last regardless;
+        // "far" (>30 days out) stays off it.
+        #expect(river.later.map(\.id) == ["own-later", "pool-later"])
+
+        // Filter down to a member with nothing — the pool stays put.
+        let filtered = FamilyDayLogic.river(
+            events: [], chores: chores, window: windowRows, actionable: boardRows,
+            selected: ["nobody"],
+            phase: .today, minute: "12:00", timeZone: tz,
+            today: "2026-08-06", day: "2026-08-06"
+        )
+        #expect(filtered.catchUp.map(\.id) == ["pool-late"])
+        #expect(filtered.flowing.map(\.id) == ["ch-pool-timed"])
+        #expect(filtered.dueToday.map(\.id) == ["pool-dated"])
+        #expect(filtered.anytime.map(\.id) == ["pool-any"])
+        #expect(filtered.tomorrow.map(\.id) == ["pool-tmrw"])
+        #expect(filtered.later.map(\.id) == ["pool-later"])
     }
 
     /// Owner 2026-08-09: a checked late row STAYS in Catch Up as a late ✓ —
@@ -91,10 +152,11 @@ import Testing
             phase: .today,
             minute: "12:00",
             timeZone: tz,
-            today: "2026-08-07"
+            today: "2026-08-07",
+            day: "2026-08-06"
         )
         #expect(river.catchUp.map(\.id) == ["flagged", "twin"])
-        #expect(river.noSetTime.map(\.id) == ["on-time"])
+        #expect(river.dueToday.map(\.id) == ["on-time"])
     }
 
     @Test func poolIsImmuneToTheFilterButClaimedRowsAreNot() {
@@ -108,11 +170,13 @@ import Testing
             selected: ["a"],
             phase: .today,
             minute: "12:00",
-            timeZone: tz
+            timeZone: tz,
+            today: "2026-08-06",
+            day: "2026-08-06"
         )
-        #expect(river.pool.map(\.id) == ["pool"])
+        #expect(river.dueToday.map(\.id) == ["pool"])
         // b's claimed row is filtered out while only a is selected.
-        #expect(river.flowing.isEmpty && river.noSetTime.isEmpty)
+        #expect(river.flowing.isEmpty && river.anytime.isEmpty && river.catchUp.isEmpty)
     }
 
     @Test func everyEventFlowsAndEndedIsAPureGreyPredicate() {
@@ -164,7 +228,8 @@ import Testing
             events: [],
             chores: [occurrence("t|a", owner: "a"), occurrence("t|b", owner: "b"), occurrence("t|c", owner: "c")],
             selected: ["a", "b", "c"],
-            phase: .today, minute: "12:00", timeZone: tz
+            phase: .today, minute: "12:00", timeZone: tz,
+            today: "2026-08-08", day: "2026-08-08"
         )
         #expect(river.flowing.count == 1)
         guard case .chores(let row) = river.flowing[0] else {
@@ -178,7 +243,8 @@ import Testing
             events: [],
             chores: [occurrence("t|a", owner: "a", status: .completed), occurrence("t|b", owner: "b")],
             selected: ["b"],
-            phase: .today, minute: "12:00", timeZone: tz
+            phase: .today, minute: "12:00", timeZone: tz,
+            today: "2026-08-08", day: "2026-08-08"
         )
         #expect(half.flowing.count == 1)
         guard case .chores(let halfRow) = half.flowing[0] else {

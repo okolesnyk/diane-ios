@@ -682,22 +682,17 @@ private func json(_ value: some Encodable) throws -> [String: Any] {
             #expect(body.recurrence == nil)
         }
 
-        @Test func onDaySendsDueDateWithoutDueMode() {
-            var state = baseState(shape: .onDay)
+        /// Owner 2026-08-10: "On a day" is retired — every dated chore is a
+        /// due date, written as dueMode "by".
+        @Test func datedSendsDueModeBy() {
+            var state = baseState(shape: .byDate)
             state.hasDueTime = true
             state.dueTime = "08:30"
             let body = ChoreFormLogic.createBody(state)
             #expect(body.dueDate == "2026-07-30")
-            #expect(body.dueMode == nil)  // plain date = 'on', sent implicitly
+            #expect(body.dueMode == .by)
             #expect(body.dueTime == "08:30")
             #expect(body.recurrence == nil)
-        }
-
-        @Test func byDateSendsDueModeBy() {
-            let body = ChoreFormLogic.createBody(baseState(shape: .byDate))
-            #expect(body.dueDate == "2026-07-30")
-            #expect(body.dueMode == .by)
-            #expect(body.dueTime == nil)  // dueTime stays opt-in
         }
 
         @Test func repeatsSendsRecurrenceOnly() {
@@ -779,7 +774,8 @@ private func json(_ value: some Encodable) throws -> [String: Any] {
 
         @Test func seedDetectsAllFourShapes() {
             #expect(ChoreFormLogic.seed(from: chore()).shape == .anytime)
-            #expect(ChoreFormLogic.seed(from: chore(dueDate: "2026-07-30")).shape == .onDay)
+            // Legacy "on" chores seed as Due date too (owner 2026-08-10).
+            #expect(ChoreFormLogic.seed(from: chore(dueDate: "2026-07-30")).shape == .byDate)
             #expect(ChoreFormLogic.seed(from: chore(dueDate: "2026-07-30", dueMode: .by)).shape == .byDate)
             let recurring = chore(recurrence: .init(freq: .weekly, byWeekday: [.mo], startDate: "2026-07-01"))
             let seeded = ChoreFormLogic.seed(from: recurring)

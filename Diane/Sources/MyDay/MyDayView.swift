@@ -1,11 +1,11 @@
 import DianeKit
 import SwiftUI
 
-/// Page 1 (M9e design): Catch up → Timeline (events + timed chores, hairline
-/// now-line, calendar-color rails) → No set time → the routine card pinned
-/// last, under a 7-day time-travel strip. Past is the read-only record;
-/// future chores are completable ("a due day is an estimate"); routines stay
-/// day-locked (streak math).
+/// Page 1 (M9e design): Catch up → Today's Timeline (timed rows with the
+/// hairline now-line, then dashed bands: due-today, anytime) → Tomorrow →
+/// Later → the routine card pinned last, under a 7-day time-travel strip.
+/// Past is the read-only record; future chores are completable ("a due day
+/// is an estimate"); routines stay day-locked (streak math).
 struct MyDayView: View {
     let context: SignedInContext
     @Environment(AppState.self) private var appState
@@ -167,8 +167,10 @@ struct MyDayView: View {
             ? loaded.actionableChores
             : loaded.windowChores.filter { $0.dueDate == day }
         let sections = MyDayLogic.sections(
-            dayChores, me: me, phase: phase,
-            today: clock.today, minute: clock.minute, timeZone: clock.timeZone
+            dayChores, window: loaded.windowChores, actionable: loaded.actionableChores,
+            me: me, phase: phase,
+            today: clock.today, minute: clock.minute, timeZone: clock.timeZone,
+            day: day
         )
         let timeline = MyDayLogic.timeline(
             events: TodayLogic.sortedEvents(dayEvents),
@@ -181,7 +183,8 @@ struct MyDayView: View {
         let myRoutines = loaded.board.filter { $0.memberId == me }
 
         let isEmpty = sections.catchUp.isEmpty && timeline.isEmpty
-            && sections.noSetTime.isEmpty && sections.anytime.isEmpty && myRoutines.isEmpty
+            && sections.dueToday.isEmpty && sections.anytime.isEmpty
+            && sections.tomorrow.isEmpty && sections.later.isEmpty && myRoutines.isEmpty
 
         return List {
             DayModeNote(phase: phase)
@@ -205,7 +208,10 @@ struct MyDayView: View {
                     sectionHeader("Catch up").foregroundStyle(.red)
                 }
             }
-            if !timeline.isEmpty {
+            // ONE bold "Today's Timeline" section (owner 2026-08-10): the
+            // timed day in order, then — each band behind a dashed hint —
+            // the clockless dated rows and the anytimers.
+            if !timeline.isEmpty || !sections.dueToday.isEmpty || !sections.anytime.isEmpty {
                 Section {
                     ForEach(Array(timeline.enumerated()), id: \.element.id) { index, item in
                         if index == nowIndex { nowLine }
@@ -214,25 +220,37 @@ struct MyDayView: View {
                         case .chore(let chore): choreRow(chore, late: chore.late)
                         }
                     }
-                    if nowIndex == timeline.count { nowLine }
-                } header: {
-                    sectionHeader("Timeline")
-                }
-            }
-            if !sections.noSetTime.isEmpty {
-                Section {
-                    ForEach(sections.noSetTime, id: \.id) { chore in choreRow(chore, late: chore.late) }
-                } header: {
-                    sectionHeader("No set time")
-                }
-            }
-            // Undated lives apart from the day's clockless business (owner
-            // 2026-08-08: one mixed pile read as confusing).
-            if !sections.anytime.isEmpty {
-                Section {
+                    if !timeline.isEmpty, nowIndex == timeline.count { nowLine }
+                    if !timeline.isEmpty && !sections.dueToday.isEmpty { AnytimeHintRow() }
+                    // The middle band wears the day's date (owner
+                    // 2026-08-10) — a tiny extra cue against the anytimers.
+                    ForEach(sections.dueToday, id: \.id) { chore in choreRow(chore, late: chore.late, dayCaption: true) }
+                    if !sections.anytime.isEmpty && (!timeline.isEmpty || !sections.dueToday.isEmpty) { AnytimeHintRow() }
                     ForEach(sections.anytime, id: \.id) { chore in choreRow(chore, late: chore.late) }
                 } header: {
-                    sectionHeader("Anytime")
+                    // Other days keep the role template, date appended
+                    // (owner 2026-08-10): "Today's Timeline - Wed, Aug 12".
+                    sectionHeader(day == clock.today ? "Today's Timeline"
+                        : "Today's Timeline - " + NavigationLogic.myDayTitle(for: day), bold: true)
+                }
+            }
+            if !sections.tomorrow.isEmpty {
+                Section {
+                    ForEach(sections.tomorrow, id: \.id) { chore in
+                        choreRow(chore, late: false, showDueCaption: false)
+                    }
+                } header: {
+                    sectionHeader(day == clock.today ? "Tomorrow"
+                        : "Tomorrow - " + NavigationLogic.myDayTitle(for: MyDayLogic.addDays(day, 1)))
+                }
+            }
+            // Beyond tomorrow, a 30-day shelf — the Chores module is the
+            // place for the full schedule (owner 2026-08-10).
+            if !sections.later.isEmpty {
+                Section {
+                    ForEach(sections.later, id: \.id) { chore in choreRow(chore, late: false) }
+                } header: {
+                    sectionHeader("Next 30 days")
                 }
             }
             if !myRoutines.isEmpty {
@@ -278,11 +296,13 @@ struct MyDayView: View {
         // swipe-to-dismiss. Day travel is the strip above and the Today pill.
     }
 
-    private func sectionHeader(_ title: String) -> some View {
+    /// Bold = the Today anchor (owner 2026-08-10) — heavier and primary so
+    /// it reads apart from Tomorrow and the rest.
+    private func sectionHeader(_ title: String, bold: Bool = false) -> some View {
         Text(title)
-            .font(.caption.weight(.semibold))
+            .font(.caption.weight(bold ? .bold : .semibold))
             .textCase(.uppercase)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(bold ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
     }
 
     /// The hairline now-line (owner-directed): 1pt red, edge to edge, no
@@ -421,7 +441,12 @@ struct MyDayView: View {
         }
     }
 
-    private func choreRow(_ chore: MyDayLogic.Chore, late: Bool) -> some View {
+    private func choreRow(
+        _ chore: MyDayLogic.Chore,
+        late: Bool,
+        showDueCaption: Bool = true,
+        dayCaption: Bool = false
+    ) -> some View {
         HStack(spacing: 10) {
             if late {
                 timeColumn(nil, allDay: false, lateBadge: true)
@@ -451,6 +476,14 @@ struct MyDayView: View {
                         } else if late, let origin = MyDayLogic.dueOrigin(chore, today: clock.today) {
                             // The debt's origin: "due yesterday 20:05".
                             Text(origin).font(.caption).foregroundStyle(.red)
+                        } else if dayCaption {
+                            Text(NavigationLogic.myDayTitle(for: day))
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else if showDueCaption, let due = chore.dueDate, due != day,
+                                  let origin = MyDayLogic.dueOrigin(chore, today: clock.today) {
+                            // A Later row wears its date (owner 2026-08-10);
+                            // the Tomorrow section's header already says it.
+                            Text(origin).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     Spacer(minLength: 0)

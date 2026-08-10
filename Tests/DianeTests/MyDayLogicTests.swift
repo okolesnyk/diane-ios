@@ -108,17 +108,40 @@ import DianeKit
             chore(id: "timed", dueTime: "18:00"),
             chore(id: "untimed"),
             chore(id: "anytime", dueDate: nil),
+            // Tomorrow comes from the WINDOW feed; beyond-tomorrow from the
+            // live board (owner 2026-08-10) — even when timed: the timeline
+            // holds only the viewed day's clock.
+            chore(id: "tmrw", dueDate: "2026-08-06"),
+            chore(id: "by-later", dueDate: "2026-08-09", dueMode: .by),
+            chore(id: "timed-later", dueDate: "2026-08-09", dueTime: "18:00"),
+            // Beyond the 30-day horizon (owner 2026-08-10): off the shelf.
+            chore(id: "far", dueDate: "2026-09-10"),
             chore(id: "sibling", owner: "sib", dueTime: "09:00"),
         ]
-        let sections = MyDayLogic.sections(rows, me: "me", phase: .today)
+        let sections = MyDayLogic.sections(
+            rows, window: rows, actionable: rows,
+            me: "me", phase: .today, day: "2026-08-05"
+        )
         #expect(sections.catchUp.map(\.id) == ["late"])
         #expect(sections.timed.map(\.id) == ["timed"])
-        #expect(sections.noSetTime.map(\.id) == ["untimed"])
+        #expect(sections.dueToday.map(\.id) == ["untimed"])
         #expect(sections.anytime.map(\.id) == ["anytime"])
-        // Off-today a late row is just the day's record, not a Catch up debt.
-        let past = MyDayLogic.sections([chore(id: "late", late: true)], me: "me", phase: .past)
-        #expect(past.catchUp.isEmpty)
-        #expect(past.noSetTime.map(\.id) == ["late"])
+        #expect(sections.tomorrow.map(\.id) == ["tmrw"])
+        #expect(sections.later.map(\.id) == ["by-later", "timed-later"])
+        // A PAST day's late rows are still the family's debts — Catch Up
+        // shows there too (owner 2026-08-10); only future days have none.
+        let past = MyDayLogic.sections([chore(id: "late", late: true)], me: "me", phase: .past, day: "2026-08-05")
+        #expect(past.catchUp.map(\.id) == ["late"])
+        #expect(past.dueToday.isEmpty)
+    }
+
+    /// Owner 2026-08-10: another year's due date carries its year — "Aug 11"
+    /// alone could be next year's.
+    @Test func dueOriginNamesTheYearWhenItDiffers() {
+        let nextYear = chore(id: "ny", dueDate: "2027-08-11")
+        #expect(MyDayLogic.dueOrigin(nextYear, today: "2026-08-10") == "due Wed, Aug 11, 2027")
+        let sameYear = chore(id: "sy", dueDate: "2026-08-15")
+        #expect(MyDayLogic.dueOrigin(sameYear, today: "2026-08-10") == "due Sat, Aug 15")
     }
 
     /// Owner 2026-08-09: a checked late chore STAYS in Catch Up as a late ✓
@@ -140,7 +163,7 @@ import DianeKit
             today: "2026-08-05", minute: "12:00", timeZone: utc
         )
         #expect(out.catchUp.map(\.id) == ["was-late", "t-late"])
-        #expect(out.noSetTime.map(\.id) == ["on-time"])
+        #expect(out.dueToday.map(\.id) == ["on-time"])
         #expect(out.timed.map(\.id) == ["t-ok"])
         // The server's flag alone suffices once the api carries it.
         let flagged = chore(id: "flagged", dueDate: "2026-08-04", late: true, status: .completed)
@@ -222,19 +245,25 @@ import DianeKit
         #expect(sections.timed.isEmpty)
     }
 
-    /// Owner 2026-08-08: dated-but-clockless and undated are different piles.
-    @Test func sectionsSplitNoSetTimeFromAnytime() {
+    /// Owner 2026-08-08: dated-but-clockless and undated are different piles
+    /// (now the two halves of the bold Today section, dashed hint between).
+    /// Owner 2026-08-10: a deadline beyond tomorrow sits on the Later shelf.
+    @Test func sectionsSplitDueTodayFromAnytime() {
+        let rows = [
+            chore(id: "dated", dueDate: "2026-08-08"),
+            chore(id: "loose", dueDate: nil),
+            chore(id: "deadline", dueDate: "2026-08-15", dueMode: .by),
+        ]
         let out = MyDayLogic.sections(
-            [
-                chore(id: "dated", dueDate: "2026-08-08"),
-                chore(id: "loose", dueDate: nil),
-                chore(id: "deadline", dueDate: "2026-08-15", dueMode: .by),
-            ],
+            rows, actionable: rows,
             me: "me",
-            phase: .today
+            phase: .today,
+            day: "2026-08-08"
         )
-        #expect(out.noSetTime.map(\.id) == ["dated", "deadline"])
+        #expect(out.dueToday.map(\.id) == ["dated"])
         #expect(out.anytime.map(\.id) == ["loose"])
+        #expect(out.tomorrow.isEmpty)
+        #expect(out.later.map(\.id) == ["deadline"])
     }
 
     /// Owner 2026-08-08: a shared chore wears every sibling's owner.

@@ -473,41 +473,43 @@ struct CalendarPageView: View {
                 $0.allDay && logic.week.occursOn(day: day, occurrence: $0)
                     && FamilyDayLogic.visible($0, selected: effectiveSelected)
             }
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(spacing: 0) {
-                        if !allDay.isEmpty {
-                            ForEach(allDay, id: \.id) { event in
-                                HStack(spacing: 8) {
-                                    Text("all day").font(.caption2).foregroundStyle(.secondary)
-                                        .frame(width: gutter, alignment: .trailing)
-                                    RoundedRectangle(cornerRadius: 2)
-                                        .fill(railColor(event, loaded: loaded)).frame(width: 4, height: 20)
-                                    DetailRow(route: .event(event), open: open) {
-                                        Text(event.summary).font(.subheadline)
-                                    }
-                                    Spacer()
-                                }
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
+            VStack(spacing: 0) {
+                // All-day events PIN above the grid (owner 2026-08-10) —
+                // inside the ScrollView they scrolled away with 00:00.
+                if !allDay.isEmpty {
+                    ForEach(allDay, id: \.id) { event in
+                        HStack(spacing: 8) {
+                            Text("all day").font(.caption2).foregroundStyle(.secondary)
+                                .frame(width: gutter, alignment: .trailing)
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(railColor(event, loaded: loaded)).frame(width: 4, height: 20)
+                            DetailRow(route: .event(event), open: open) {
+                                Text(event.summary).font(.subheadline)
                             }
-                            Divider()
+                            Spacer()
                         }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                    }
+                    Divider()
+                }
+                ScrollViewReader { proxy in
+                    ScrollView {
                         gridBody(blocks: blocks, loaded: loaded)
                     }
-                }
-                // One finger scrolls; hold-then-drag draws. The pan is cut
-                // only once a draft actually exists — a moving finger fails
-                // the long press and scrolls normally (owner 2026-08-07:
-                // "make scrolling work with 1 finger").
-                .scrollDisabled(draft != nil)
-                .refreshable { await load() }
-                // Re-anchored per day AND per data arrival: an onAppear-only
-                // scrollTo fires before the loaded grid has laid out and
-                // lands on 00:00. The breath lets layout settle first.
-                .task(id: "\(day)|\(data.value?.events.count ?? -1)") {
-                    try? await Task.sleep(for: .milliseconds(120))
-                    scrollToAnchor(proxy, blocks: blocks, animated: false)
+                    // One finger scrolls; hold-then-drag draws. The pan is cut
+                    // only once a draft actually exists — a moving finger fails
+                    // the long press and scrolls normally (owner 2026-08-07:
+                    // "make scrolling work with 1 finger").
+                    .scrollDisabled(draft != nil)
+                    .refreshable { await load() }
+                    // Re-anchored per day AND per data arrival: an onAppear-only
+                    // scrollTo fires before the loaded grid has laid out and
+                    // lands on 00:00. The breath lets layout settle first.
+                    .task(id: "\(day)|\(data.value?.events.count ?? -1)") {
+                        try? await Task.sleep(for: .milliseconds(120))
+                        scrollToAnchor(proxy, blocks: blocks, animated: false)
+                    }
                 }
             }
         } else {

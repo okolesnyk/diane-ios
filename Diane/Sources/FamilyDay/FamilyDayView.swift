@@ -226,18 +226,22 @@ struct FamilyDayView: View {
         let river = FamilyDayLogic.river(
             events: dayEvents,
             chores: dayChores,
+            window: loaded.windowChores,
+            actionable: loaded.actionableChores,
             selected: effectiveSelected,
             phase: phase,
             minute: clock.minute,
             timeZone: clock.timeZone,
-            today: clock.today
+            today: clock.today,
+            day: day
         )
         let nowIndex = phase == .today
             ? FamilyDayLogic.nowIndex(items: river.flowing, minute: clock.minute, timeZone: clock.timeZone)
             : nil
 
         let isEmpty = river.catchUp.isEmpty && river.flowing.isEmpty
-            && river.noSetTime.isEmpty && river.anytime.isEmpty && river.pool.isEmpty
+            && river.dueToday.isEmpty && river.anytime.isEmpty
+            && river.tomorrow.isEmpty && river.later.isEmpty
 
         return List {
             DayModeNote(phase: phase)
@@ -256,32 +260,48 @@ struct FamilyDayView: View {
                     ForEach(river.catchUp, id: \.id) { row in choreRow(row, loaded: loaded, late: true) }
                 } header: { header("Catch up").foregroundStyle(.red) }
             }
-            // Nothing folds away (owner 2026-08-07): the whole day stands in
-            // time order, finished things greyed in place.
-            if !river.flowing.isEmpty {
+            // ONE bold "Today's Timeline" section (owner 2026-08-10): the
+            // timed day in order — nothing folds away (owner 2026-08-07),
+            // finished things grey in place — then, each band behind a
+            // dashed hint, the clockless dated rows and the anytimers. Pool
+            // rows sit at the bottom of whichever band their date and time
+            // chose; the standalone Up for grabs shelf is gone.
+            if !river.flowing.isEmpty || !river.dueToday.isEmpty || !river.anytime.isEmpty {
                 Section {
                     ForEach(Array(river.flowing.enumerated()), id: \.element.id) { index, item in
                         if index == nowIndex { NowLineRow(minute: clock.minute) }
                         riverRow(item, loaded: loaded)
                     }
-                    if nowIndex == river.flowing.count { NowLineRow(minute: clock.minute) }
-                } header: { header("Timeline") }
-            }
-            if !river.noSetTime.isEmpty {
-                Section {
-                    ForEach(river.noSetTime, id: \.id) { row in choreRow(row, loaded: loaded, late: row.late && !row.completed) }
-                } header: { header("No set time") }
-            }
-            // Undated apart from the day's clockless business (owner 2026-08-08).
-            if !river.anytime.isEmpty {
-                Section {
+                    if !river.flowing.isEmpty, nowIndex == river.flowing.count { NowLineRow(minute: clock.minute) }
+                    if !river.flowing.isEmpty && !river.dueToday.isEmpty { AnytimeHintRow() }
+                    // The middle band wears the day's date (owner
+                    // 2026-08-10) — a tiny extra cue against the anytimers.
+                    ForEach(river.dueToday, id: \.id) { row in choreRow(row, loaded: loaded, late: row.late && !row.completed, dayCaption: true) }
+                    if !river.anytime.isEmpty && (!river.flowing.isEmpty || !river.dueToday.isEmpty) { AnytimeHintRow() }
                     ForEach(river.anytime, id: \.id) { row in choreRow(row, loaded: loaded, late: false) }
-                } header: { header("Anytime") }
+                } header: {
+                    // Other days keep the role template, date appended
+                    // (owner 2026-08-10): "Today's Timeline - Wed, Aug 12".
+                    header(day == clock.today ? "Today's Timeline"
+                        : "Today's Timeline - " + NavigationLogic.myDayTitle(for: day), bold: true)
+                }
             }
-            if !river.pool.isEmpty {
+            if !river.tomorrow.isEmpty {
                 Section {
-                    ForEach(river.pool, id: \.id) { row in poolRow(row) }
-                } header: { header("Up for grabs") }
+                    ForEach(river.tomorrow, id: \.id) { row in
+                        choreRow(row, loaded: loaded, late: false, showDueCaption: false)
+                    }
+                } header: {
+                    header(day == clock.today ? "Tomorrow"
+                        : "Tomorrow - " + NavigationLogic.myDayTitle(for: MyDayLogic.addDays(day, 1)))
+                }
+            }
+            // Beyond tomorrow, a 30-day shelf — the Chores module is the
+            // place for the full schedule (owner 2026-08-10).
+            if !river.later.isEmpty {
+                Section {
+                    ForEach(river.later, id: \.id) { row in choreRow(row, loaded: loaded, late: false) }
+                } header: { header("Next 30 days") }
             }
             if phase != .past {
                 Section {
@@ -318,11 +338,13 @@ struct FamilyDayView: View {
         // horizontal gesture. The strip above travels days.
     }
 
-    private func header(_ title: String) -> some View {
+    /// Bold = the Today anchor (owner 2026-08-10) — heavier and primary so
+    /// it reads apart from Tomorrow and the rest.
+    private func header(_ title: String, bold: Bool = false) -> some View {
         Text(title)
-            .font(.caption.weight(.semibold))
+            .font(.caption.weight(bold ? .bold : .semibold))
             .textCase(.uppercase)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(bold ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
     }
 
     @ViewBuilder
@@ -373,7 +395,9 @@ struct FamilyDayView: View {
     private func choreRow(
         _ row: ChoresPageLogic.Row,
         loaded: DayData,
-        late: Bool
+        late: Bool,
+        showDueCaption: Bool = true,
+        dayCaption: Bool = false
     ) -> some View {
         HStack(spacing: 10) {
             if late {
@@ -403,9 +427,20 @@ struct FamilyDayView: View {
                                 .strikethrough(row.completed, color: .secondary)
                                 .foregroundStyle(row.completed ? Color.secondary : Color.primary)
                         }
+                        // No pool caption any more (owner 2026-08-10:
+                        // "Anyone can take it" was noise) — the dashed
+                        // circle says it; pool rows caption like the rest.
                         if let note = ChoresPageLogic.subtitle(row, today: clock.today, names: memberNames),
                            row.completed {
                             Text(note).font(.caption).foregroundStyle(.secondary)
+                        } else if dayCaption {
+                            Text(NavigationLogic.myDayTitle(for: day))
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else if showDueCaption, let due = row.dueDate, due != day,
+                                  let origin = MyDayLogic.dueOrigin(row.lead, today: clock.today) {
+                            // A Later row wears its date (owner 2026-08-10);
+                            // the Tomorrow section's header already says it.
+                            Text(origin).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     Spacer(minLength: 0)
@@ -427,34 +462,11 @@ struct FamilyDayView: View {
                 .grayscale(row.completed ? 1 : 0)
         )
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            // Pool rows dismiss too (owner 2026-08-10): "I don't want this
+            // done any more" needs no owner. Claim is gone — checking a pool
+            // row takes it, and edit assigns it deliberately.
             if !row.completed && phase != .past {
                 Button("Dismiss") { confirmDismiss = row.lead }.tint(.orange)
-            }
-        }
-    }
-
-    private func poolRow(_ row: ChoresPageLogic.Row) -> some View {
-        HStack(spacing: 10) {
-            circleButton(row, late: false)
-            DetailRow(route: .chore(row.lead), open: open) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            if let emoji = row.emoji { Text(emoji) }
-                            Text(row.title)
-                        }
-                        Text("Anyone can take it").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-        }
-        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
-        .listRowInsets(rowInsets)
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            if phase == .today {
-                Button("Claim") { Task { await act("claim", on: row.lead) } }.tint(.blue)
             }
         }
     }

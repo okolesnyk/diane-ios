@@ -90,18 +90,26 @@ enum FamilyDayLogic {
     }
 
     struct River: Equatable {
-        /// Selected members' late rows (today only) — My Day's pattern.
+        /// Late rows — the family's debts (today AND past-day views; a late
+        /// pool row is everyone's debt too — owner 2026-08-10).
         var catchUp: [ChoresPageLogic.Row] = []
         /// The whole timed day, time-ordered: events (ended ones grey in
-        /// place, they never hide — owner 2026-08-07) + timed chore rows
-        /// (completed ones crossed and grey in place).
+        /// place, they never hide — owner 2026-08-07) + timed chore rows,
+        /// pool included. The bold "Today's Timeline" section's top band.
         var flowing: [RiverItem] = []
-        /// DATED but untimed rows — the day's clockless business.
-        var noSetTime: [ChoresPageLogic.Row] = []
-        /// Undated rows — never late, always available (owner 2026-08-08).
+        /// Rows DUE the viewed day but clockless — the middle band, behind
+        /// a dashed hint (owner 2026-08-10).
+        var dueToday: [ChoresPageLogic.Row] = []
+        /// Undated rows — the bottom band, behind a second dashed hint
+        /// (owner 2026-08-10); only the real today shows them.
         var anytime: [ChoresPageLogic.Row] = []
-        /// Unclaimed up-for-grabs — everyone's business, immune to the filter.
-        var pool: [ChoresPageLogic.Row] = []
+        /// The NEXT day's rows (window feed — recurring previews included).
+        var tomorrow: [ChoresPageLogic.Row] = []
+        /// Dated beyond tomorrow, within 30 days — the "Next 30 days"
+        /// shelf (owner 2026-08-10), dates on the rows; one-offs only (a
+        /// daily chore would spam it). Pool last, as everywhere. The
+        /// Chores page owns the far future.
+        var later: [ChoresPageLogic.Row] = []
     }
 
     static func visible(_ row: ChoresPageLogic.Row, selected: Set<String>) -> Bool {
@@ -111,40 +119,71 @@ enum FamilyDayLogic {
     /// Split the family's day. Nothing folds away any more (owner
     /// 2026-08-07): finished things grey out where they stand — the view
     /// asks `hasEnded` per event. Shared chores arrive per-assignee and
-    /// leave as one row each.
+    /// leave as one row each. The pool has no shelf of its own any more
+    /// (owner 2026-08-09): up-for-grabs rows spread through the same
+    /// sections by date and time — late is everyone's debt, timed joins
+    /// the timeline, dated lands on Due today, undated in Anytime —
+    /// always AFTER the owned rows of their section and always immune to
+    /// the member filter.
     static func river(
         events: [Event],
         chores: [Chore],
+        window: [Chore] = [],
+        actionable: [Chore] = [],
         selected: Set<String>,
         phase: MyDayLogic.DayPhase,
         minute: String,
         timeZone: TimeZone,
-        today: String? = nil
+        today: String? = nil,
+        day: String? = nil
     ) -> River {
         var out = River()
+        var poolCatchUp: [ChoresPageLogic.Row] = []
+        var poolDueToday: [ChoresPageLogic.Row] = []
+        var poolAnytime: [ChoresPageLogic.Row] = []
+        let viewed = day ?? today
+        let next = MyDayLogic.addDays(viewed ?? "", 1)
 
         for row in ChoresPageLogic.rows(chores) {
-            if row.isPool && row.lead.status == .open {
-                out.pool.append(row)
-                continue
+            let pool = row.isPool
+            if !pool {
+                guard visible(row, selected: selected) else { continue }
             }
-            guard visible(row, selected: selected) else { continue }
             // Late-done rows stay too (owner 2026-08-09): a checked catch-up
             // reads as "the catch-up got done", not a fresh on-time ✓.
             let rowLate = row.occurrences.contains {
                 MyDayLogic.effectivelyLate($0, today: today ?? "", minute: minute)
                     || MyDayLogic.lateWhenDone($0, timeZone: timeZone)
             }
-            if phase == .today && rowLate {
-                out.catchUp.append(row)
-            } else if row.dueTime != nil {
+            if phase != .future && rowLate {
+                if pool { poolCatchUp.append(row) } else { out.catchUp.append(row) }
+            } else if row.dueTime != nil && row.dueDate == viewed {
                 out.flowing.append(.chores(row))
-            } else if row.dueDate != nil {
-                out.noSetTime.append(row)
-            } else {
-                out.anytime.append(row)
+            } else if row.dueDate != nil && row.dueDate == viewed {
+                if pool { poolDueToday.append(row) } else { out.dueToday.append(row) }
+            } else if row.dueDate == nil {
+                if pool { poolAnytime.append(row) } else { out.anytime.append(row) }
             }
+            // Dated for another day: Tomorrow and Later own those below.
         }
+        out.catchUp += poolCatchUp
+        out.dueToday += poolDueToday
+        out.anytime += poolAnytime
+
+        // Tomorrow reads the WINDOW so recurring previews show; Later reads
+        // the live board (one-offs only — the window would spam repeats).
+        // Pool rows stay filter-immune and sink to each section's bottom.
+        func poolLast(_ rows: [ChoresPageLogic.Row]) -> [ChoresPageLogic.Row] {
+            rows.filter { !$0.isPool && visible($0, selected: selected) }
+                + rows.filter(\.isPool)
+        }
+        let horizon = MyDayLogic.addDays(viewed ?? "", 30)
+        out.tomorrow = poolLast(ChoresPageLogic.rows(window.filter { $0.dueDate == next }))
+        out.later = poolLast(ChoresPageLogic.rows(
+            actionable
+                .filter { ($0.dueDate ?? "") > next && ($0.dueDate ?? "") <= horizon }
+                .sorted { ($0.dueDate ?? "", $0.id) < ($1.dueDate ?? "", $1.id) }
+        ))
 
         for event in events where visible(event, selected: selected) {
             out.flowing.append(.event(event))

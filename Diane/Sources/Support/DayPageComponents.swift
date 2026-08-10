@@ -81,3 +81,28 @@ struct CheckCircle: View {
         return locked || pool ? "circle.dashed" : "circle"
     }
 }
+
+/// The dashed hint between the day's dated business and the anytimers
+/// folded under the bold Today section (owner 2026-08-10) — a whisper of
+/// separation, not a full section break.
+struct AnytimeHintRow: View {
+    var body: some View {
+        AnytimeHintLine()
+            .stroke(style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            .foregroundStyle(.quaternary)
+            .frame(height: 1)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets())
+    }
+}
+
+private struct AnytimeHintLine: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        return path
+    }
+}
