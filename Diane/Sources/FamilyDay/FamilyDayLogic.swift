@@ -103,13 +103,6 @@ enum FamilyDayLogic {
         /// Undated rows — the bottom band, behind a second dashed hint
         /// (owner 2026-08-10); only the real today shows them.
         var anytime: [ChoresPageLogic.Row] = []
-        /// The NEXT day's rows (window feed — recurring previews included).
-        var tomorrow: [ChoresPageLogic.Row] = []
-        /// Dated beyond tomorrow, within 30 days — the "Next 30 days"
-        /// shelf (owner 2026-08-10), dates on the rows; one-offs only (a
-        /// daily chore would spam it). Pool last, as everywhere. The
-        /// Chores page owns the far future.
-        var later: [ChoresPageLogic.Row] = []
     }
 
     static func visible(_ row: ChoresPageLogic.Row, selected: Set<String>) -> Bool {
@@ -128,8 +121,6 @@ enum FamilyDayLogic {
     static func river(
         events: [Event],
         chores: [Chore],
-        window: [Chore] = [],
-        actionable: [Chore] = [],
         selected: Set<String>,
         phase: MyDayLogic.DayPhase,
         minute: String,
@@ -142,7 +133,6 @@ enum FamilyDayLogic {
         var poolDueToday: [ChoresPageLogic.Row] = []
         var poolAnytime: [ChoresPageLogic.Row] = []
         let viewed = day ?? today
-        let next = MyDayLogic.addDays(viewed ?? "", 1)
 
         for row in ChoresPageLogic.rows(chores) {
             let pool = row.isPool
@@ -164,26 +154,12 @@ enum FamilyDayLogic {
             } else if row.dueDate == nil {
                 if pool { poolAnytime.append(row) } else { out.anytime.append(row) }
             }
-            // Dated for another day: Tomorrow and Later own those below.
+            // Dated for another day: the Chores page owns those (owner
+            // 2026-08-10 — Tomorrow and the 30-day shelf are gone).
         }
         out.catchUp += poolCatchUp
         out.dueToday += poolDueToday
         out.anytime += poolAnytime
-
-        // Tomorrow reads the WINDOW so recurring previews show; Later reads
-        // the live board (one-offs only — the window would spam repeats).
-        // Pool rows stay filter-immune and sink to each section's bottom.
-        func poolLast(_ rows: [ChoresPageLogic.Row]) -> [ChoresPageLogic.Row] {
-            rows.filter { !$0.isPool && visible($0, selected: selected) }
-                + rows.filter(\.isPool)
-        }
-        let horizon = MyDayLogic.addDays(viewed ?? "", 30)
-        out.tomorrow = poolLast(ChoresPageLogic.rows(window.filter { $0.dueDate == next }))
-        out.later = poolLast(ChoresPageLogic.rows(
-            actionable
-                .filter { ($0.dueDate ?? "") > next && ($0.dueDate ?? "") <= horizon }
-                .sorted { ($0.dueDate ?? "", $0.id) < ($1.dueDate ?? "", $1.id) }
-        ))
 
         for event in events where visible(event, selected: selected) {
             out.flowing.append(.event(event))

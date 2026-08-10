@@ -1,10 +1,12 @@
 import DianeKit
 import SwiftUI
 
-/// The M9e shell: My Day · Family Day · Apps · one customizable slot.
-/// The fourth tab is a device-local per-member pin (owner rule 2026-08-05);
-/// when its module is switched off household-wide it falls back to Calendar
-/// at render time — no server sweep, the pin survives for the module's return.
+/// The M9e shell: Today · Home · one customizable slot. My Day is gone
+/// (owner 2026-08-10 — "almost everything is on Family Day"), and Family
+/// Day wears the Today name. The third tab is a device-local per-member pin
+/// (owner rule 2026-08-05); when its module is switched off household-wide
+/// it falls back to Calendar at render time — no server sweep, the pin
+/// survives for the module's return.
 struct RootTabView: View {
     let context: SignedInContext
     @Environment(AppState.self) private var appState
@@ -16,7 +18,7 @@ struct RootTabView: View {
     @State private var fourthTab: FourthTabStore
     /// One member filter for the whole app (owner 2026-08-06).
     @State private var filter = MemberFilterStore()
-    /// Which tab is showing. DEBUG builds accept `-uiTab <0…3>` at launch so
+    /// Which tab is showing. DEBUG builds accept `-uiTab <0…2>` at launch so
     /// screenshots can reach any page without a human tapping (simctl can
     /// capture the screen but cannot tap).
     @State private var tab = RootTabView.launchTab
@@ -33,7 +35,7 @@ struct RootTabView: View {
         if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-uiTab"),
            index + 1 < ProcessInfo.processInfo.arguments.count,
            let value = Int(ProcessInfo.processInfo.arguments[index + 1]),
-           (0...3).contains(value) {
+           (0...2).contains(value) {
             return value
         }
         #endif
@@ -53,8 +55,8 @@ struct RootTabView: View {
             get: { tab },
             set: { newValue in
                 if newValue == tab {
-                    if newValue == 2 { homePath = NavigationPath() }
-                    if newValue == 3 { modulePath = NavigationPath() }
+                    if newValue == 1 { homePath = NavigationPath() }
+                    if newValue == 2 { modulePath = NavigationPath() }
                 }
                 tab = newValue
             }
@@ -67,22 +69,19 @@ struct RootTabView: View {
             modules: clock.modules
         )
         TabView(selection: tabSelection) {
-            MyDayView(context: context)
-                .tabItem { Label("My Day", systemImage: "sun.max") }
-                .tag(0)
             FamilyDayView(context: context)
-                .tabItem { Label("Family Day", systemImage: "person.3") }
-                .tag(1)
+                .tabItem { Label("Today", systemImage: "sun.max") }
+                .tag(0)
             HomeView(
                 context: context,
                 path: $homePath,
                 pinnedTab: effective,
                 // The bottom menu never gets a twin: the pinned module's
                 // tile selects its tab (owner 2026-08-08).
-                selectPinnedTab: { tab = 3 }
+                selectPinnedTab: { tab = 2 }
             )
             .tabItem { Label("Home", systemImage: "house") }
-            .tag(2)
+            .tag(1)
             NavigationStack(path: $modulePath) {
                 ModuleScreen(
                     module: effective,
@@ -94,7 +93,7 @@ struct RootTabView: View {
                 // A different module is a different tab identity — rebuild,
                 // don't morph, so per-screen state never leaks across.
                 .id(effective)
-                .tag(3)
+                .tag(2)
         }
         .environment(signals)
         .environment(clock)

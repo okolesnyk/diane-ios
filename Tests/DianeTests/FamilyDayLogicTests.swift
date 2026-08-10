@@ -94,21 +94,8 @@ import Testing
             chore(id: "own-any", dueDate: nil),
             chore(id: "pool-any", owner: nil, dueDate: nil),
         ]
-        // Tomorrow reads the window; Later reads the live board (owner
-        // 2026-08-10), pool last in both.
-        let windowRows = [
-            chore(id: "own-tmrw", dueDate: "2026-08-07"),
-            chore(id: "pool-tmrw", owner: nil, dueDate: "2026-08-07"),
-        ]
-        let boardRows = chores + windowRows + [
-            chore(id: "pool-later", owner: nil, dueDate: "2026-08-09"),
-            chore(id: "own-later", dueDate: "2026-08-08"),
-            // Beyond the 30-day horizon (owner 2026-08-10): the Chores
-            // page owns it — the shelf must NOT.
-            chore(id: "far", dueDate: "2026-09-10"),
-        ]
         let river = FamilyDayLogic.river(
-            events: [], chores: chores, window: windowRows, actionable: boardRows,
+            events: [], chores: chores,
             selected: ["a"],
             phase: .today, minute: "12:00", timeZone: tz,
             today: "2026-08-06", day: "2026-08-06"
@@ -117,14 +104,10 @@ import Testing
         #expect(river.flowing.map(\.id) == ["ch-pool-timed"])
         #expect(river.dueToday.map(\.id) == ["own-dated", "pool-dated"])
         #expect(river.anytime.map(\.id) == ["own-any", "pool-any"])
-        #expect(river.tomorrow.map(\.id) == ["own-tmrw", "pool-tmrw"])
-        // The 30-day shelf sorts by date, pool sinking last regardless;
-        // "far" (>30 days out) stays off it.
-        #expect(river.later.map(\.id) == ["own-later", "pool-later"])
 
         // Filter down to a member with nothing — the pool stays put.
         let filtered = FamilyDayLogic.river(
-            events: [], chores: chores, window: windowRows, actionable: boardRows,
+            events: [], chores: chores,
             selected: ["nobody"],
             phase: .today, minute: "12:00", timeZone: tz,
             today: "2026-08-06", day: "2026-08-06"
@@ -133,8 +116,6 @@ import Testing
         #expect(filtered.flowing.map(\.id) == ["ch-pool-timed"])
         #expect(filtered.dueToday.map(\.id) == ["pool-dated"])
         #expect(filtered.anytime.map(\.id) == ["pool-any"])
-        #expect(filtered.tomorrow.map(\.id) == ["pool-tmrw"])
-        #expect(filtered.later.map(\.id) == ["pool-later"])
     }
 
     /// Owner 2026-08-09: a checked late row STAYS in Catch Up as a late ✓ —

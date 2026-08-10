@@ -3,7 +3,7 @@ import Testing
 @testable import Diane
 import DianeKit
 
-// Page 1 (M9e): the pure math behind My Day.
+// The day pages' shared math (My Day itself retired owner 2026-08-10).
 @Suite struct MyDayLogicTests {
     typealias Chore = MyDayLogic.Chore
     typealias Event = MyDayLogic.Event
@@ -74,22 +74,6 @@ import DianeKit
         #expect(range.to > "2026-08-08")
     }
 
-    @Test func minenessKeepsMineAndClaimedButDropsTheUnclaimedPool() {
-        #expect(MyDayLogic.isMine(chore(owner: "me"), me: "me"))
-        #expect(MyDayLogic.isMine(chore(owner: nil, claimed: "me"), me: "me"))
-        #expect(!MyDayLogic.isMine(chore(owner: nil), me: "me"))
-        #expect(!MyDayLogic.isMine(chore(owner: "sib"), me: "me"))
-        // A pool chore someone ELSE claimed is theirs, not mine.
-        #expect(!MyDayLogic.isMine(chore(owner: nil, claimed: "sib"), me: "me"))
-    }
-
-    @Test func familyEventsAreMine() {
-        #expect(MyDayLogic.isMyEvent(event(members: nil), me: "me"))
-        #expect(MyDayLogic.isMyEvent(event(members: []), me: "me"))
-        #expect(MyDayLogic.isMyEvent(event(members: ["me", "sib"]), me: "me"))
-        #expect(!MyDayLogic.isMyEvent(event(members: ["sib"]), me: "me"))
-    }
-
     @Test func allDayEventsSpanEndExclusive() {
         let tz = TimeZone(identifier: "Europe/Warsaw")!
         let stay = event(allDay: true, startsAt: nil, startDate: "2026-08-05", endDate: "2026-08-07")
@@ -102,39 +86,6 @@ import DianeKit
         #expect(MyDayLogic.onDay(lateNight, date: "2026-08-06", timeZone: tz))
     }
 
-    @Test func sectionsPartitionLateTimedAndUntimed() {
-        let rows = [
-            chore(id: "late", late: true),
-            chore(id: "timed", dueTime: "18:00"),
-            chore(id: "untimed"),
-            chore(id: "anytime", dueDate: nil),
-            // Tomorrow comes from the WINDOW feed; beyond-tomorrow from the
-            // live board (owner 2026-08-10) — even when timed: the timeline
-            // holds only the viewed day's clock.
-            chore(id: "tmrw", dueDate: "2026-08-06"),
-            chore(id: "by-later", dueDate: "2026-08-09", dueMode: .by),
-            chore(id: "timed-later", dueDate: "2026-08-09", dueTime: "18:00"),
-            // Beyond the 30-day horizon (owner 2026-08-10): off the shelf.
-            chore(id: "far", dueDate: "2026-09-10"),
-            chore(id: "sibling", owner: "sib", dueTime: "09:00"),
-        ]
-        let sections = MyDayLogic.sections(
-            rows, window: rows, actionable: rows,
-            me: "me", phase: .today, day: "2026-08-05"
-        )
-        #expect(sections.catchUp.map(\.id) == ["late"])
-        #expect(sections.timed.map(\.id) == ["timed"])
-        #expect(sections.dueToday.map(\.id) == ["untimed"])
-        #expect(sections.anytime.map(\.id) == ["anytime"])
-        #expect(sections.tomorrow.map(\.id) == ["tmrw"])
-        #expect(sections.later.map(\.id) == ["by-later", "timed-later"])
-        // A PAST day's late rows are still the family's debts — Catch Up
-        // shows there too (owner 2026-08-10); only future days have none.
-        let past = MyDayLogic.sections([chore(id: "late", late: true)], me: "me", phase: .past, day: "2026-08-05")
-        #expect(past.catchUp.map(\.id) == ["late"])
-        #expect(past.dueToday.isEmpty)
-    }
-
     /// Owner 2026-08-10: another year's due date carries its year — "Aug 11"
     /// alone could be next year's.
     @Test func dueOriginNamesTheYearWhenItDiffers() {
@@ -144,47 +95,25 @@ import DianeKit
         #expect(MyDayLogic.dueOrigin(sameYear, today: "2026-08-10") == "due Sat, Aug 15")
     }
 
-    /// Owner 2026-08-09: a checked late chore STAYS in Catch Up as a late ✓
-    /// instead of jumping back to its schedule section; on-time and early
-    /// checks still gray out where they stand.
-    @Test func lateDoneStaysInCatchUp() {
+    /// Owner 2026-08-09: a checked late chore reads as a truthful late-done
+    /// — checked after its due day, or past its own-day time + grace.
+    @Test func lateWhenDoneReadsTheCatchUpCheck() {
         let utc = TimeZone(identifier: "UTC")!
-        let rows = [
+        #expect(MyDayLogic.lateWhenDone(
             chore(id: "was-late", dueDate: "2026-08-04", status: .completed,
-                  completedAt: "2026-08-05T10:00:00.000Z"),
-            chore(id: "on-time", status: .completed, completedAt: "2026-08-05T09:00:00.000Z"),
+                  completedAt: "2026-08-05T10:00:00.000Z"), timeZone: utc))
+        #expect(MyDayLogic.lateWhenDone(
             chore(id: "t-late", dueTime: "08:00", status: .completed,
-                  completedAt: "2026-08-05T08:20:00.000Z"),
+                  completedAt: "2026-08-05T08:20:00.000Z"), timeZone: utc))
+        #expect(!MyDayLogic.lateWhenDone(
+            chore(id: "on-time", status: .completed,
+                  completedAt: "2026-08-05T09:00:00.000Z"), timeZone: utc))
+        #expect(!MyDayLogic.lateWhenDone(
             chore(id: "t-ok", dueTime: "08:00", status: .completed,
-                  completedAt: "2026-08-05T08:10:00.000Z"),
-        ]
-        let out = MyDayLogic.sections(
-            rows, me: "me", phase: .today,
-            today: "2026-08-05", minute: "12:00", timeZone: utc
-        )
-        #expect(out.catchUp.map(\.id) == ["was-late", "t-late"])
-        #expect(out.dueToday.map(\.id) == ["on-time"])
-        #expect(out.timed.map(\.id) == ["t-ok"])
+                  completedAt: "2026-08-05T08:10:00.000Z"), timeZone: utc))
         // The server's flag alone suffices once the api carries it.
         let flagged = chore(id: "flagged", dueDate: "2026-08-04", late: true, status: .completed)
         #expect(MyDayLogic.lateWhenDone(flagged, timeZone: utc))
-    }
-
-    @Test func timelineMergesAndOrdersEventsWithTimedChores() {
-        let tz = TimeZone(identifier: "UTC")!
-        let items = MyDayLogic.timeline(
-            events: [
-                event(id: "lunch", startsAt: "2026-08-05T12:00:00.000Z"),
-                event(id: "allday", allDay: true, startsAt: nil, startDate: "2026-08-05", endDate: "2026-08-06"),
-            ],
-            timedChores: [chore(id: "recycle", dueTime: "09:30")],
-            timeZone: tz
-        )
-        #expect(items.map(\.id) == ["ev-allday", "ch-recycle", "ev-lunch"])
-        // The hairline sits after everything ≤ now (the ride-above-the-
-        // active-chore idea was tried and dropped — owner 2026-08-08).
-        #expect(MyDayLogic.nowLineIndex(items: items, minute: "10:00", timeZone: tz) == 2)
-        #expect(MyDayLogic.nowLineIndex(items: items, minute: "23:59", timeZone: tz) == 3)
     }
 
     @Test func railFollowsTheSourceCalendar() {
@@ -200,20 +129,6 @@ import DianeKit
         #expect(MyDayLogic.railColorHex(for: event(calendarId: "cal-x"), calendars: calendars) == nil)
     }
 
-    @Test func dotsPreviewMyLoad() {
-        let tz = TimeZone(identifier: "UTC")!
-        let dots = MyDayLogic.dots(
-            for: "2026-08-05",
-            events: [event()],
-            chores: [chore(dueDate: "2026-08-05")],
-            me: "me",
-            timeZone: tz
-        )
-        #expect(dots.hasEvents && dots.hasChores)
-        let empty = MyDayLogic.dots(for: "2026-08-09", events: [event()], chores: [chore()], me: "me", timeZone: tz)
-        #expect(!empty.hasEvents && !empty.hasChores)
-    }
-
     /// Owner 2026-08-08: a strip swipe lands on the day NEAREST to where
     /// you came from — next week's first day, previous week's last.
     @Test func stripPagingLandsOnTheNearestEdgeDay() {
@@ -227,7 +142,7 @@ import DianeKit
 
     /// Owner 2026-08-08: a timed chore reads LATE 15 min past its at/due
     /// time on its own day — the display twin of the server rule.
-    @Test func gracedLatenessMovesTimedChoresToCatchUp() {
+    @Test func gracedLatenessIsTheDisplayTwin() {
         let timed = chore(id: "t", dueDate: "2026-08-08", dueTime: "22:00")
         #expect(!MyDayLogic.effectivelyLate(timed, today: "2026-08-08", minute: "22:14"))
         #expect(MyDayLogic.effectivelyLate(timed, today: "2026-08-08", minute: "22:15"))
@@ -237,46 +152,6 @@ import DianeKit
         // Completed rows are never late; server-late passes straight through.
         let done = chore(id: "d", dueDate: "2026-08-08", dueTime: "22:00", status: .completed)
         #expect(!MyDayLogic.effectivelyLate(done, today: "2026-08-08", minute: "23:00"))
-
-        let sections = MyDayLogic.sections(
-            [timed], me: "me", phase: .today, today: "2026-08-08", minute: "22:20"
-        )
-        #expect(sections.catchUp.map(\.id) == ["t"])
-        #expect(sections.timed.isEmpty)
-    }
-
-    /// Owner 2026-08-08: dated-but-clockless and undated are different piles
-    /// (now the two halves of the bold Today section, dashed hint between).
-    /// Owner 2026-08-10: a deadline beyond tomorrow sits on the Later shelf.
-    @Test func sectionsSplitDueTodayFromAnytime() {
-        let rows = [
-            chore(id: "dated", dueDate: "2026-08-08"),
-            chore(id: "loose", dueDate: nil),
-            chore(id: "deadline", dueDate: "2026-08-15", dueMode: .by),
-        ]
-        let out = MyDayLogic.sections(
-            rows, actionable: rows,
-            me: "me",
-            phase: .today,
-            day: "2026-08-08"
-        )
-        #expect(out.dueToday.map(\.id) == ["dated"])
-        #expect(out.anytime.map(\.id) == ["loose"])
-        #expect(out.tomorrow.isEmpty)
-        #expect(out.later.map(\.id) == ["deadline"])
-    }
-
-    /// Owner 2026-08-08: a shared chore wears every sibling's owner.
-    @Test func sharedOwnersSpanTheSiblingGroup() {
-        let mine = chore(id: "t|me", choreId: "shared", dueDate: "2026-08-08")
-        let all = [
-            mine,
-            chore(id: "t|kid", choreId: "shared", owner: "kid", dueDate: "2026-08-08"),
-            chore(id: "other", choreId: "other", owner: "kid", dueDate: "2026-08-08"),
-        ]
-        #expect(MyDayLogic.sharedOwners(of: mine, in: all) == ["kid", "me"])
-        // A chore missing from the set falls back to its own owner.
-        #expect(MyDayLogic.sharedOwners(of: mine, in: []) == ["me"])
     }
 
     // MARK: - The future routine board (scheduled reality from definitions)

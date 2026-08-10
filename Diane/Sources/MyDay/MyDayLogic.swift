@@ -1,10 +1,11 @@
 import DianeKit
 import Foundation
 
-/// Page 1 (M9e design): the pure math behind My Day — the 7-day strip, the
-/// Catch up / Timeline / Due today partition, the merged event+chore
-/// timeline with the hairline now-line, and the calendar-color rails.
-/// Nonisolated on purpose: Views inherit @MainActor, logic must not.
+/// The day pages' shared math (M9e; My Day itself retired owner 2026-08-10):
+/// local-date arithmetic, the 7-day strip, late display twins, timeline sort
+/// keys, due-origin captions, the future routine board, and the
+/// calendar-color rails. Nonisolated on purpose: Views inherit @MainActor,
+/// logic must not.
 enum MyDayLogic {
     typealias Event = Components.Schemas.EventOccurrence
     typealias Chore = Components.Schemas.ChoreOccurrence
@@ -173,21 +174,7 @@ enum MyDayLogic {
             }
     }
 
-    // MARK: - Mine-ness
-
-    /// My Day shows MY business: chores I own (assigned to me, or pool rows I
-    /// claimed/completed). The unclaimed pool is family business — it lives
-    /// on Family Day and in the Chores module, not here.
-    static func isMine(_ chore: Chore, me: String) -> Bool {
-        (chore.claimedByMemberId ?? chore.assigneeMemberId) == me
-    }
-
-    /// "Whole family includes me, so it must be on my day" (owner rule):
-    /// nil/empty memberIds = family-wide. Otherwise membership decides.
-    static func isMyEvent(_ event: Event, me: String) -> Bool {
-        guard let members = event.memberIds, !members.isEmpty else { return true }
-        return members.contains(me)
-    }
+    // MARK: - Day membership
 
     /// Does an event belong on this local day? Timed events localize their
     /// start instant; all-day events span [startDate, endDate) end-exclusive.
@@ -203,30 +190,7 @@ enum MyDayLogic {
         return TodayLogic.dateString(for: instant, timeZone: timeZone) == date
     }
 
-    // MARK: - The section partition
-
-    struct Sections: Equatable {
-        /// Late, red — the family's debts (today AND past-day views; a
-        /// future day has no debts yet — owner 2026-08-10).
-        var catchUp: [Chore] = []
-        /// Timed chores, merged into the event timeline — the bold
-        /// "Today's Timeline" section's top band.
-        var timed: [Chore] = []
-        /// DUE the viewed day but clockless — the middle band, behind a
-        /// dashed hint (owner 2026-08-10).
-        var dueToday: [Chore] = []
-        /// Undated — the bottom band, behind a second dashed hint (owner
-        /// 2026-08-10); only the real today shows them.
-        var anytime: [Chore] = []
-        /// The NEXT day's rows, from the window feed so recurring previews
-        /// appear too (owner 2026-08-10).
-        var tomorrow: [Chore] = []
-        /// Dated beyond tomorrow, within 30 days — the "Next 30 days"
-        /// shelf (owner 2026-08-10), dates on the rows. One-offs only by
-        /// design: a daily chore would spam it. The Chores page owns the
-        /// far future.
-        var later: [Chore] = []
-    }
+    // MARK: - Late math (display twin of the server's rule)
 
     /// Minutes past a timed chore's at/due time before it reads late on its
     /// own day — the SERVER owns this rule (packages/chores LATE_GRACE_MINUTES);
@@ -263,58 +227,6 @@ enum MyDayLogic {
         return TodayLogic.clockMinutes(of: instant, timeZone: timeZone) >= due + lateGraceMinutes
     }
 
-    static func sections(
-        _ occurrences: [Chore],
-        window: [Chore] = [],
-        actionable: [Chore] = [],
-        me: String,
-        phase: DayPhase,
-        today: String = "",
-        minute: String = "",
-        timeZone: TimeZone = .current,
-        day: String? = nil
-    ) -> Sections {
-        var out = Sections()
-        let viewed = day ?? today
-        let next = addDays(viewed, 1)
-        for chore in occurrences where isMine(chore, me: me) {
-            if phase != .future,
-               effectivelyLate(chore, today: today, minute: minute)
-                   || lateWhenDone(chore, timeZone: timeZone) {
-                out.catchUp.append(chore)
-            } else if chore.dueTime != nil && chore.dueDate == viewed {
-                out.timed.append(chore)
-            } else if chore.dueDate != nil && chore.dueDate == viewed {
-                out.dueToday.append(chore)
-            } else if chore.dueDate == nil {
-                out.anytime.append(chore)
-            }
-            // Dated for another day: Tomorrow and Later own those below.
-        }
-        // Tomorrow reads the WINDOW so recurring previews show; the 30-day
-        // shelf reads the live board (one-offs only — the window would spam
-        // repeats) and stops at its horizon (owner 2026-08-10): the Chores
-        // page owns the far future.
-        let horizon = addDays(viewed, 30)
-        out.tomorrow = window.filter { isMine($0, me: me) && $0.dueDate == next }
-        out.later = actionable
-            .filter { isMine($0, me: me) && ($0.dueDate ?? "") > next && ($0.dueDate ?? "") <= horizon }
-            .sorted { ($0.dueDate ?? "", $0.id) < ($1.dueDate ?? "", $1.id) }
-        return out
-    }
-
-    /// Every owner of a chore's (choreId, dueDate) sibling group — the
-    /// engine emits one occurrence per assignee, and a shared chore must
-    /// wear ALL its members even on pages that show just one occurrence
-    /// (owner 2026-08-08).
-    static func sharedOwners(of chore: Chore, in all: [Chore]) -> [String] {
-        let owners = all
-            .filter { $0.choreId == chore.choreId && $0.dueDate == chore.dueDate }
-            .sorted { $0.id < $1.id }
-            .compactMap { $0.claimedByMemberId ?? $0.assigneeMemberId }
-        return owners.isEmpty ? FamilyDayLogic.owners(of: chore) : owners
-    }
-
     // MARK: - The merged timeline
 
     enum TimelineItem: Equatable, Identifiable {
@@ -346,31 +258,6 @@ enum MyDayLogic {
 
     }
 
-    /// Events + TIMED chores, one time-ordered river ("a chore due at 18:00
-    /// belongs at 18:00, not in a separate silo" — the approved design).
-    static func timeline(
-        events: [Event],
-        timedChores: [Chore],
-        timeZone: TimeZone
-    ) -> [TimelineItem] {
-        let items = events.map(TimelineItem.event) + timedChores.map(TimelineItem.chore)
-        return items.sorted { lhs, rhs in
-            let l = lhs.sortKey(timeZone: timeZone)
-            let r = rhs.sortKey(timeZone: timeZone)
-            return l == r ? lhs.id < rhs.id : l < r
-        }
-    }
-
-    /// Where the hairline now-line sits: the index of the first item after
-    /// the current minute (nil off-today — the line only exists on today).
-    static func nowLineIndex(items: [TimelineItem], minute: String, timeZone: TimeZone) -> Int? {
-        guard let now = TodayLogic.minutes(minute) else { return nil }
-        for (index, item) in items.enumerated() where item.sortKey(timeZone: timeZone) > now {
-            return index
-        }
-        return items.count
-    }
-
     /// "due yesterday 20:05" — the debt's origin on a Catch up row.
     static func dueOrigin(_ chore: Chore, today: String) -> String? {
         guard let due = chore.dueDate else { return nil }
@@ -398,23 +285,10 @@ enum MyDayLogic {
         return calendar.color ?? calendar.providerColor
     }
 
-    // MARK: - Strip dots (blue events / orange chores preview)
+    // MARK: - Strip dots (blue events / orange chores; Family Day fills them)
 
     struct DayDots: Equatable {
         var hasEvents = false
         var hasChores = false
-    }
-
-    static func dots(
-        for date: String,
-        events: [Event],
-        chores: [Chore],
-        me: String,
-        timeZone: TimeZone
-    ) -> DayDots {
-        DayDots(
-            hasEvents: events.contains { isMyEvent($0, me: me) && onDay($0, date: date, timeZone: timeZone) },
-            hasChores: chores.contains { isMine($0, me: me) && $0.dueDate == date }
-        )
     }
 }

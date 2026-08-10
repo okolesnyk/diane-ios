@@ -442,6 +442,8 @@ struct CalendarPageView: View {
         Color(hex: MyDayLogic.railColorHex(for: event, calendars: loaded.calendars) ?? "#34c759")
     }
 
+    /// Whole-family rows carry no badge — the house glyph was noise
+    /// (owner 2026-08-10).
     @ViewBuilder
     private func facepile(_ memberIds: [String]?, loaded: PageData) -> some View {
         if let ids = memberIds, !ids.isEmpty {
@@ -452,8 +454,6 @@ struct CalendarPageView: View {
                     }
                 }
             }
-        } else {
-            Text("🏠").font(.subheadline)
         }
     }
 

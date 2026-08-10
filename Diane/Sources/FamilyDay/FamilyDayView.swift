@@ -1,12 +1,12 @@
 import DianeKit
 import SwiftUI
 
-/// Page 2 (M9e design): the family river under the member chips. Chips tap
-/// to filter and double-tap to solo (owner 2026-08-07 — the mock's chip
-/// grammar; the pushed member glance is retired); whole-family rows render
-/// once with the house glyph and ignore every filter; finished business
-/// greys out in place (owner 2026-08-07 — nothing folds away); the pool is
-/// pinned last before the one ghost "+ New".
+/// The Today tab (owner 2026-08-10 — My Day is gone, this IS the day page):
+/// the family river under the member chips, everyone's routine cards pinned
+/// last. Chips tap to filter and double-tap to solo (owner 2026-08-07 — the
+/// mock's chip grammar); whole-family rows render once and ignore every
+/// filter; finished business greys out in place (owner 2026-08-07 — nothing
+/// folds away).
 struct FamilyDayView: View {
     let context: SignedInContext
     @Environment(AppState.self) private var appState
@@ -17,7 +17,8 @@ struct FamilyDayView: View {
     @State private var path = NavigationPath()
     @State private var data: Loadable<DayData> = .loading
     @Environment(MemberFilterStore.self) private var filter
-    @State private var activeSheet: MyDayView.ActiveSheet?
+    @State private var activeSheet: ActiveSheet?
+    @State private var openRoutines: Set<String> = []
     @State private var confirmDismiss: MyDayLogic.Chore?
     @State private var confirmUncheck: ChoresPageLogic.Row?
     @State private var actionError: String?
@@ -35,6 +36,18 @@ struct FamilyDayView: View {
         var board: [Components.Schemas.RoutineBoardEntry]
         var members: [Components.Schemas.Member]
         var calendars: [MyDayLogic.CalendarInfo]
+    }
+
+    enum ActiveSheet: Identifiable {
+        case newEvent(defaultDate: String)
+        case newChore
+
+        var id: String {
+            switch self {
+            case .newEvent(let date): "ev-\(date)"
+            case .newChore: "ch"
+            }
+        }
     }
 
     private var day: String { selectedDate ?? clock.today }
@@ -81,10 +94,13 @@ struct FamilyDayView: View {
                         onSaved: { Task { await load() } }
                     )
                 case .newChore:
+                    // A future day's new chore is due THAT day (owner
+                    // 2026-08-10); today keeps the anytime default.
                     ChoreFormView(
                         context: context,
                         members: members,
                         mode: .create,
+                        defaultDate: day == clock.today ? nil : day,
                         onSaved: { Task { await load() } }
                     )
                 }
@@ -226,8 +242,6 @@ struct FamilyDayView: View {
         let river = FamilyDayLogic.river(
             events: dayEvents,
             chores: dayChores,
-            window: loaded.windowChores,
-            actionable: loaded.actionableChores,
             selected: effectiveSelected,
             phase: phase,
             minute: clock.minute,
@@ -238,10 +252,11 @@ struct FamilyDayView: View {
         let nowIndex = phase == .today
             ? FamilyDayLogic.nowIndex(items: river.flowing, minute: clock.minute, timeZone: clock.timeZone)
             : nil
+        // Everyone's routine cards, member-filtered like every owned row.
+        let routines = loaded.board.filter { effectiveSelected.contains($0.memberId) }
 
         let isEmpty = river.catchUp.isEmpty && river.flowing.isEmpty
-            && river.dueToday.isEmpty && river.anytime.isEmpty
-            && river.tomorrow.isEmpty && river.later.isEmpty
+            && river.dueToday.isEmpty && river.anytime.isEmpty && routines.isEmpty
 
         return List {
             DayModeNote(phase: phase)
@@ -286,22 +301,12 @@ struct FamilyDayView: View {
                         : "Today's Timeline - " + NavigationLogic.myDayTitle(for: day), bold: true)
                 }
             }
-            if !river.tomorrow.isEmpty {
+            // Routines ride where Tomorrow and the 30-day shelf were (owner
+            // 2026-08-10) — My Day's cards, washed in each member's color.
+            if !routines.isEmpty {
                 Section {
-                    ForEach(river.tomorrow, id: \.id) { row in
-                        choreRow(row, loaded: loaded, late: false, showDueCaption: false)
-                    }
-                } header: {
-                    header(day == clock.today ? "Tomorrow"
-                        : "Tomorrow - " + NavigationLogic.myDayTitle(for: MyDayLogic.addDays(day, 1)))
-                }
-            }
-            // Beyond tomorrow, a 30-day shelf — the Chores module is the
-            // place for the full schedule (owner 2026-08-10).
-            if !river.later.isEmpty {
-                Section {
-                    ForEach(river.later, id: \.id) { row in choreRow(row, loaded: loaded, late: false) }
-                } header: { header("Next 30 days") }
+                    ForEach(routines, id: \.self) { entry in routineRows(entry) }
+                } header: { header("Routines") }
             }
             if phase != .past {
                 Section {
@@ -396,7 +401,6 @@ struct FamilyDayView: View {
         _ row: ChoresPageLogic.Row,
         loaded: DayData,
         late: Bool,
-        showDueCaption: Bool = true,
         dayCaption: Bool = false
     ) -> some View {
         HStack(spacing: 10) {
@@ -436,10 +440,10 @@ struct FamilyDayView: View {
                         } else if dayCaption {
                             Text(NavigationLogic.myDayTitle(for: day))
                                 .font(.caption).foregroundStyle(.secondary)
-                        } else if showDueCaption, let due = row.dueDate, due != day,
+                        } else if let due = row.dueDate, due != day,
                                   let origin = MyDayLogic.dueOrigin(row.lead, today: clock.today) {
-                            // A Later row wears its date (owner 2026-08-10);
-                            // the Tomorrow section's header already says it.
+                            // An off-day row wears its origin ("due
+                            // yesterday" in Catch Up), owner 2026-08-10.
                             Text(origin).font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -511,12 +515,11 @@ struct FamilyDayView: View {
             .frame(width: 48, alignment: .trailing)
     }
 
-    /// Facepile for owned rows; the house glyph for whole-family ones.
+    /// Facepile for owned rows; whole-family rows carry no badge — the
+    /// house glyph was noise (owner 2026-08-10).
     @ViewBuilder
     private func whoBadge(owners: [String]) -> some View {
-        if owners.isEmpty {
-            Text("🏠").font(.subheadline)
-        } else {
+        if !owners.isEmpty {
             HStack(spacing: -7) {
                 ForEach(owners.prefix(3), id: \.self) { id in
                     if let member = members.first(where: { $0.id == id }) {
@@ -597,15 +600,134 @@ struct FamilyDayView: View {
         if data.value == nil { data = .failed("Check the connection and try again.") }
     }
 
-    /// The board is garnish here (chip rings) and its endpoint refuses
-    /// future dates by design — a 422 must never sink the whole load, which
-    /// it used to: every fetched payload was discarded on future days.
+    /// Today and the recent past come from the real board. FUTURE days come
+    /// from the definitions — "future days show scheduled reality" (mock) —
+    /// because the board endpoint refuses dates actions can't land on; its
+    /// 422 must never sink the whole load.
     private func fetchBoard(day: String) async -> [Components.Schemas.RoutineBoardEntry] {
-        guard day <= clock.today else { return [] }
+        if day > clock.today {
+            guard case .ok(let ok)? = try? await context.client.api.listRoutines(.init()),
+                  let routines = try? ok.body.json.routines
+            else { return [] }
+            return MyDayLogic.futureBoard(routines: routines, day: day)
+        }
         guard case .ok(let ok)? = try? await context.client.api.getRoutineBoard(
             .init(query: .init(date: day))
         ) else { return [] }
         return (try? ok.body.json.entries) ?? []
+    }
+
+    // MARK: - Routine cards (My Day's exact card — owner 2026-08-10 — plus
+    // the member wash on the MAIN row only; foldable, day-locked)
+
+    /// The header row wears the member wash; expanded task rows go bare
+    /// (owner 2026-08-10 — "just the routine main row, tasks without").
+    @ViewBuilder
+    private func routineRows(_ entry: Components.Schemas.RoutineBoardEntry) -> some View {
+        let done = entry.tasks.count(where: { $0.status != .open })
+        let total = entry.tasks.count
+        let complete = total > 0 && done == total
+        let streak = entry.streak + (complete ? 1 : 0)
+        let key = "\(day)|\(entry.routineId)|\(entry.memberId)"
+        let open = openRoutines.contains(key)
+        let locked = phase != .today
+
+        Button {
+            if open { openRoutines.remove(key) } else { openRoutines.insert(key) }
+        } label: {
+            HStack(spacing: 8) {
+                if let emoji = entry.emoji { Text(emoji) }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.title).font(.body.weight(.semibold))
+                    Text(routineSub(entry, done: done, total: total, complete: complete))
+                        .font(.caption)
+                        .foregroundStyle(complete ? .green : .secondary)
+                }
+                Spacer()
+                if streak >= 2 {
+                    Text("🔥 \(streak)").font(.subheadline)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(open ? 180 : 0))
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(entry.title), \(done) of \(total) done, \(open ? "expanded" : "collapsed")")
+        .listRowInsets(rowInsets)
+        .listRowBackground(tintBackground(owners: [entry.memberId]))
+
+        if open {
+            ForEach(entry.tasks, id: \.taskId) { task in
+                HStack(spacing: 10) {
+                    Button {
+                        guard !locked else { return }
+                        Task { await routineAct(task, entry: entry) }
+                    } label: {
+                        Image(systemName: task.status == .open
+                            ? (locked ? "circle.dashed" : "circle")
+                            : task.status == .skipped ? "arrow.uturn.right.circle" : "checkmark.circle.fill")
+                            .font(.system(size: 22))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(task.status == .completed ? .green : task.status == .skipped ? .orange : .secondary)
+                            .opacity(locked ? 0.55 : 1)
+                            .frame(width: 40, height: 40)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(locked)
+                    if let emoji = task.emoji { Text(emoji).font(.subheadline) }
+                    Text(task.title)
+                        .font(.subheadline)
+                        .strikethrough(task.status == .completed, color: .secondary)
+                    Spacer()
+                    if task.starValue > 0 {
+                        Text("★ \(task.starValue)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .padding(.leading, 6)
+                .listRowInsets(rowInsets)
+                .listRowSeparator(.hidden)
+            }
+        }
+    }
+
+    private func routineSub(
+        _ entry: Components.Schemas.RoutineBoardEntry,
+        done: Int,
+        total: Int,
+        complete: Bool
+    ) -> String {
+        let window = "\(entry.windowStart)–\(entry.windowEnd)"
+        return complete ? "\(window) · Done for today ✓" : "\(window) · \(done) of \(total)"
+    }
+
+    private func routineAct(
+        _ task: Components.Schemas.RoutineBoardEntry.TasksPayloadPayload,
+        entry: Components.Schemas.RoutineBoardEntry
+    ) async {
+        do {
+            // Acts AS the card's member — the family page's kiosk grammar.
+            let body = Components.Schemas.RoutineTaskAction(date: day, memberId: entry.memberId)
+            switch task.status {
+            case .open:
+                _ = try await context.client.api.completeRoutineTask(
+                    .init(path: .init(id: task.taskId), body: .json(body))
+                )
+            default:
+                _ = try await context.client.api.uncompleteRoutineTask(
+                    .init(path: .init(id: task.taskId), body: .json(body))
+                )
+            }
+            await load()
+        } catch {
+            guard !isTaskCancellation(error) else { return }
+            actionError = "Check the connection and try again."
+        }
     }
 
     private func act(_ name: String, on chore: MyDayLogic.Chore) async {
