@@ -18,59 +18,72 @@ import Testing
         #expect(NavigationLogic.enabledModules(ModuleSwitchboard()) == DianeModule.allCases)
     }
 
-    @Test func mainSlotFallsBackToCalendarWhileItsModuleIsOff() {
+    /// Owner 2026-08-10, "the Apple way": the bar is one ordered layout.
+    /// Today and Home are always members (any position); an off module's
+    /// slot sits out and revives where it was when the module returns.
+    @Test func effectiveBarKeepsOrderAndSitsOutOffModules() {
         let rewardsOff = ModuleSwitchboard(chores: true, routines: true, rewards: false)
-        #expect(NavigationLogic.effectivePinnedTabs(pinned: [.rewards], modules: rewardsOff) == [.calendar])
-        // The pin is NOT forgotten — the module returning revives it.
-        #expect(NavigationLogic.effectivePinnedTabs(pinned: [.rewards], modules: ModuleSwitchboard()) == [.rewards])
-        #expect(NavigationLogic.effectivePinnedTabs(pinned: [.chores], modules: rewardsOff) == [.chores])
+        let items: [TabItem] = [.module(.calendar), .today, .module(.rewards), .home, .module(.chores)]
+        #expect(NavigationLogic.effectiveBar(items: items, modules: rewardsOff)
+            == [.module(.calendar), .today, .home, .module(.chores)])
+        // The slot is NOT forgotten — the module returning revives it.
+        #expect(NavigationLogic.effectiveBar(items: items, modules: ModuleSwitchboard()) == items)
+        // Today and Home cannot be lost, whatever is on disk.
+        #expect(NavigationLogic.effectiveBar(items: [.module(.chores)], modules: ModuleSwitchboard())
+            == [.today, .home, .module(.chores)])
+        #expect(NavigationLogic.effectiveBar(items: [], modules: rewardsOff) == [.today, .home])
     }
 
-    /// Owner 2026-08-10: up to two extra slots. An off extra sits out (no
-    /// Calendar fallback — only the main slot has one), and the main slot's
-    /// fallback never doubles an extra Calendar pin.
-    @Test func extraSlotsSitOutWhenOffAndNeverDouble() {
-        let rewardsOff = ModuleSwitchboard(chores: true, routines: true, rewards: false)
-        #expect(NavigationLogic.effectivePinnedTabs(
-            pinned: [.calendar, .chores, .rewards], modules: rewardsOff) == [.calendar, .chores])
-        #expect(NavigationLogic.effectivePinnedTabs(
-            pinned: [.calendar, .chores, .rewards], modules: ModuleSwitchboard()) == [.calendar, .chores, .rewards])
-        // Main pinned rewards while off → Calendar; a Calendar extra must
-        // not appear twice.
-        #expect(NavigationLogic.effectivePinnedTabs(
-            pinned: [.rewards, .calendar], modules: rewardsOff) == [.calendar])
-        #expect(NavigationLogic.effectivePinnedTabs(pinned: [], modules: rewardsOff) == [.calendar])
-    }
-
-    @Test @MainActor func pinnedTabsStoreIsPerMemberAndPersists() {
+    @Test @MainActor func tabLayoutStoreIsPerMemberAndPersists() {
         let defaults = UserDefaults(suiteName: "navlogic-tests-\(UUID().uuidString)")!
-        let alex = PinnedTabsStore(memberID: "m-alex", defaults: defaults)
-        #expect(alex.pinned == [.calendar]) // default
-        alex.pin(.chores)
-        #expect(alex.pinned == [.chores])
-        // Extras append after the main slot, capped at three total.
-        alex.add(.rewards)
-        alex.add(.routines)
-        alex.add(.calendar)
-        #expect(alex.pinned == [.chores, .rewards, .routines])
-        // Removing frees a slot; the main slot is never removable.
-        alex.remove(.rewards)
-        alex.remove(.chores)
-        #expect(alex.pinned == [.chores, .routines])
-        // Re-pinning a module that held an extra slot moves it, not doubles.
-        alex.pin(.routines)
-        #expect(alex.pinned == [.routines])
+        let alex = TabLayoutStore(memberID: "m-alex", defaults: defaults)
+        #expect(alex.barItems == [.today, .home, .module(.calendar)]) // default
+        // ONE add path (owner 2026-08-10): modules append, capped at five.
+        alex.addToBar(.chores)
+        alex.addToBar(.rewards)
+        alex.addToBar(.routines)
+        #expect(alex.barItems == [.today, .home, .module(.calendar), .module(.chores), .module(.rewards)])
+        #expect(alex.barIsFull)
+        // Any module can leave — Calendar included.
+        alex.removeFromBar(.calendar)
+        alex.removeFromBar(.rewards)
+        #expect(alex.barItems == [.today, .home, .module(.chores)])
+        // Reorder moves anything, Today and Home included.
+        alex.moveBarItem(.module(.chores), to: .today)
+        #expect(alex.barItems == [.module(.chores), .today, .home])
+        alex.moveBarItem(.today, to: .home)
+        #expect(alex.barItems == [.module(.chores), .home, .today])
         // A different member on the same device keeps their own layout.
-        #expect(PinnedTabsStore(memberID: "m-bruno", defaults: defaults).pinned == [.calendar])
-        // A fresh store for the same member reads the persisted pins.
-        #expect(PinnedTabsStore(memberID: "m-alex", defaults: defaults).pinned == [.routines])
-        // The pre-extras single pin reads as slot 1.
+        #expect(TabLayoutStore(memberID: "m-bruno", defaults: defaults).barItems
+            == [.today, .home, .module(.calendar)])
+        // A fresh store for the same member reads the persisted layout.
+        #expect(TabLayoutStore(memberID: "m-alex", defaults: defaults).barItems
+            == [.module(.chores), .home, .today])
+        // Older single-pin and pinned-list layouts read as bar slots 3+.
         let legacy = UserDefaults(suiteName: "navlogic-tests-\(UUID().uuidString)")!
         legacy.set("chores", forKey: "fourthTab.m-old")
-        #expect(PinnedTabsStore(memberID: "m-old", defaults: legacy).pinned == [.chores])
-        // Garbage on disk degrades to the default, never crashes.
-        defaults.set("meals,junk", forKey: "pinnedTabs.m-alex")
-        #expect(PinnedTabsStore(memberID: "m-alex", defaults: defaults).pinned == [.calendar])
+        #expect(TabLayoutStore(memberID: "m-old", defaults: legacy).barItems
+            == [.today, .home, .module(.chores)])
+        legacy.set("calendar,rewards", forKey: "pinnedTabs.m-mid")
+        #expect(TabLayoutStore(memberID: "m-mid", defaults: legacy).barItems
+            == [.today, .home, .module(.calendar), .module(.rewards)])
+        // Garbage on disk degrades to Today + Home, never crashes.
+        defaults.set("meals,junk", forKey: "tabBar.m-alex")
+        #expect(TabLayoutStore(memberID: "m-alex", defaults: defaults).barItems == [.today, .home])
+    }
+
+    @Test @MainActor func homeGridOrderPersistsAndAdoptsNewModules() {
+        let defaults = UserDefaults(suiteName: "navlogic-tests-\(UUID().uuidString)")!
+        let store = TabLayoutStore(memberID: "m-alex", defaults: defaults)
+        let all = DianeModule.allCases
+        #expect(store.orderedTiles(enabled: all) == all) // canonical default
+        store.moveTile(.rewards, to: .calendar, enabled: all)
+        #expect(store.orderedTiles(enabled: all) == [.rewards, .calendar, .chores, .routines])
+        // A module the switchboard hides drops out without losing its seat.
+        #expect(store.orderedTiles(enabled: [.calendar, .chores, .rewards]) == [.rewards, .calendar, .chores])
+        // A fresh store reads the persisted order; unknown modules append.
+        #expect(TabLayoutStore(memberID: "m-alex", defaults: defaults)
+            .orderedTiles(enabled: all) == [.rewards, .calendar, .chores, .routines])
     }
 
     @Test func myDayTitleFormatsTheHouseholdDay() {

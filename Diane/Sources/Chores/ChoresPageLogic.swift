@@ -181,7 +181,7 @@ enum ChoresPageLogic {
             let shelf = live.filter { $0.dueDate == nil }.sorted(by: order)
             if !shelf.isEmpty {
                 out.append(.init(
-                    id: "anytime", title: "Anytime — never late", kind: .anytime,
+                    id: "anytime", title: "Anytime", kind: .anytime,
                     rows: shelf, allDone: shelf.allSatisfy(\.completed), newChoreDate: nil
                 ))
             }
@@ -278,13 +278,17 @@ enum ChoresPageLogic {
             else { return nil }
             return "done by \(name)"
         }
+        // No "Late —" prefix (owner 2026-08-10): the Catch up lane and the
+        // red styling already say it.
         if row.late {
-            return row.dueDate.map { "Late — was due \(ChoresManageLogic.monthDay($0))" }
+            return row.dueDate.map { "Due \(ChoresManageLogic.monthDay($0))" }
         }
+        // Just the date (owner 2026-08-10 — "flexible until then" was noise).
         if row.dueMode == .by, let due = row.dueDate {
-            return "By \(ChoresManageLogic.monthDay(due)) — flexible until then"
+            return "By \(ChoresManageLogic.monthDay(due))"
         }
-        if row.dueDate == nil { return "Anytime" }
+        // Undated rows carry no sub — the Anytime lane already says it
+        // (owner 2026-08-10).
         return row.dueTime
     }
 

@@ -1,14 +1,13 @@
 import DianeKit
 import SwiftUI
 
-/// The M9e shell: Today · Home · one to three module slots. My Day is gone
-/// (owner 2026-08-10 — "almost everything is on Family Day"), and Family
-/// Day wears the Today name. The module slots are device-local per-member
-/// pins (owner rule 2026-08-05): the third tab always exists (default
-/// Calendar, changeable), and up to two more can join (owner 2026-08-10).
-/// A pinned module switched off household-wide falls back to Calendar
-/// (main slot) or sits out (extras) at render time — no server sweep, the
-/// pin survives for the module's return.
+/// The M9e shell, fully rearrangeable (owner 2026-08-10, "the Apple way"):
+/// the bottom bar renders the member's ordered layout — Today and Home
+/// always present but movable, plus up to three module tabs (default just
+/// Calendar). My Day is gone ("almost everything is on Family Day"); Family
+/// Day wears the Today name. The layout is device-local per member (owner
+/// rule 2026-08-05); a module switched off household-wide sits out at
+/// render time — no server sweep, its slot revives on return.
 struct RootTabView: View {
     let context: SignedInContext
     @Environment(AppState.self) private var appState
@@ -17,18 +16,19 @@ struct RootTabView: View {
     /// ONE client for the view's life — each SSEClient owns a URLSession,
     /// and sessions are never fully released (review M9).
     @State private var sse = SSEClient()
-    @State private var pinnedTabs: PinnedTabsStore
+    @State private var layout: TabLayoutStore
     /// One member filter for the whole app (owner 2026-08-06).
     @State private var filter = MemberFilterStore()
-    /// Which tab is showing. DEBUG builds accept `-uiTab <0…4>` at launch so
-    /// screenshots can reach any page without a human tapping (simctl can
-    /// capture the screen but cannot tap).
-    @State private var tab = RootTabView.launchTab
-    /// One stack per module slot — module pages push chore/event details
-    /// onto theirs (nav rule 2: details open from anywhere).
-    @State private var modulePaths: [NavigationPath] = Array(
-        repeating: NavigationPath(), count: PinnedTabsStore.maxSlots
-    )
+    /// Which tab is showing — the ITEM, not its index: reordering the bar
+    /// must never teleport the selection. DEBUG builds accept `-uiTab
+    /// <0…4>` at launch so screenshots can reach any page without a human
+    /// tapping (simctl can capture the screen but cannot tap).
+    @State private var tab: TabItem = .today
+    @State private var appliedLaunchTab = false
+    /// One stack per module — module pages push chore/event details onto
+    /// theirs (nav rule 2: details open from anywhere). Keyed by module so
+    /// reordering the bar never mixes stacks up.
+    @State private var modulePaths: [DianeModule: NavigationPath] = [:]
     /// Home's stack, held here so re-tapping the Home tab pops to the grid.
     @State private var homePath = NavigationPath()
     @Environment(\.scenePhase) private var scenePhase
@@ -48,69 +48,62 @@ struct RootTabView: View {
 
     init(context: SignedInContext) {
         self.context = context
-        _pinnedTabs = State(initialValue: PinnedTabsStore(memberID: context.session.memberID))
+        _layout = State(initialValue: TabLayoutStore(memberID: context.session.memberID))
     }
 
     /// Re-tapping the active tab pops its stack — that's how you leave a
     /// module opened from Home, since module pages never wear a back button
     /// (owner 2026-08-08).
-    private var tabSelection: Binding<Int> {
+    private var tabSelection: Binding<TabItem> {
         Binding(
             get: { tab },
             set: { newValue in
                 if newValue == tab {
-                    if newValue == 1 { homePath = NavigationPath() }
-                    if newValue >= 2 { modulePaths[newValue - 2] = NavigationPath() }
+                    switch newValue {
+                    case .today: break
+                    case .home: homePath = NavigationPath()
+                    case .module(let module): modulePaths[module] = NavigationPath()
+                    }
                 }
                 tab = newValue
             }
         )
     }
 
-    var body: some View {
-        let effective = NavigationLogic.effectivePinnedTabs(
-            pinned: pinnedTabs.pinned,
-            modules: clock.modules
+    private func modulePath(_ module: DianeModule) -> Binding<NavigationPath> {
+        Binding(
+            get: { modulePaths[module] ?? NavigationPath() },
+            set: { modulePaths[module] = $0 }
         )
+    }
+
+    var body: some View {
+        let bar = NavigationLogic.effectiveBar(items: layout.barItems, modules: clock.modules)
         TabView(selection: tabSelection) {
-            FamilyDayView(context: context)
-                .tabItem { Label("Today", systemImage: "sun.max") }
-                .tag(0)
-            HomeView(
-                context: context,
-                path: $homePath,
-                pinnedModules: effective,
-                // The bottom menu never gets a twin: a pinned module's
-                // tile selects its tab (owner 2026-08-08).
-                selectPinnedTab: { module in
-                    if let slot = effective.firstIndex(of: module) { tab = 2 + slot }
-                }
-            )
-            .tabItem { Label("Home", systemImage: "house") }
-            .tag(1)
-            ForEach(Array(effective.enumerated()), id: \.element) { slot, module in
-                NavigationStack(path: $modulePaths[slot]) {
-                    ModuleScreen(
-                        module: module,
-                        context: context,
-                        open: { modulePaths[slot].append($0) }
-                    )
-                }
-                .tabItem { Label(module.title, systemImage: module.systemImage) }
-                // A different module is a different tab identity — rebuild,
-                // don't morph, so per-screen state never leaks across.
-                .id(module)
-                .tag(2 + slot)
+            ForEach(bar) { item in
+                tabContent(item, bar: bar)
+                    .tabItem { Label(item.title, systemImage: item.systemImage) }
+                    // A different occupant is a different tab identity —
+                    // rebuild, don't morph, so per-screen state never
+                    // leaks across.
+                    .id(item)
+                    .tag(item)
             }
         }
-        // A slot vanishing (module switched off) must not strand the
-        // selection on a tag that no longer exists.
-        .onChange(of: effective) { _, next in
-            if tab >= 2 + next.count { tab = 0 }
+        // A slot vanishing (module switched off or removed) must not
+        // strand the selection on a tag that no longer exists.
+        .onChange(of: bar) { _, next in
+            if !next.contains(tab) { tab = .today }
+        }
+        .onAppear {
+            guard !appliedLaunchTab else { return }
+            appliedLaunchTab = true
+            let index = Self.launchTab
+            if bar.indices.contains(index) { tab = bar[index] }
         }
         .environment(signals)
         .environment(clock)
-        .environment(pinnedTabs)
+        .environment(layout)
         .environment(filter)
         // The stream tears down only on real backgrounding — transient
         // .inactive (control center, permission alerts, app switcher peek)
@@ -155,6 +148,30 @@ struct RootTabView: View {
         }
     }
 
+    @ViewBuilder
+    private func tabContent(_ item: TabItem, bar: [TabItem]) -> some View {
+        switch item {
+        case .today:
+            FamilyDayView(context: context)
+        case .home:
+            HomeView(
+                context: context,
+                path: $homePath,
+                barModules: bar.compactMap(\.module),
+                // The bottom menu never gets a twin: a bar module's tile
+                // selects its tab (owner 2026-08-08).
+                selectBarTab: { module in tab = .module(module) }
+            )
+        case .module(let module):
+            NavigationStack(path: modulePath(module)) {
+                ModuleScreen(
+                    module: module,
+                    context: context,
+                    open: { modulePaths[module, default: NavigationPath()].append($0) }
+                )
+            }
+        }
+    }
 }
 
 /// One module screen for BOTH doors: a module always wears the root chrome

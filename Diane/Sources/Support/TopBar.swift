@@ -26,6 +26,9 @@ struct DianeTopBar: View {
     /// avatar — Chores puts History here (owner 2026-08-06). Rare by design:
     /// the bar stays title-left, avatar-right everywhere else.
     var trailing: AnyView?
+    /// Temporarily takes the avatar's seat — Home's edit-mode Done button
+    /// (owner 2026-08-10).
+    var avatarReplacement: AnyView?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -47,18 +50,22 @@ struct DianeTopBar: View {
             }
             Spacer(minLength: 8)
             if let trailing { trailing }
-            NavigationLink {
-                SettingsView(context: context, asPage: true)
-            } label: {
-                MemberAvatarView(
-                    name: context.session.memberName,
-                    colorHex: context.session.memberColor,
-                    avatar: nil,
-                    size: 32
-                )
+            if let avatarReplacement {
+                avatarReplacement
+            } else {
+                NavigationLink {
+                    SettingsView(context: context, asPage: true)
+                } label: {
+                    MemberAvatarView(
+                        name: context.session.memberName,
+                        colorHex: context.session.memberColor,
+                        avatar: nil,
+                        size: 32
+                    )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Settings")
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Settings")
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
