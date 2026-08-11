@@ -28,6 +28,14 @@ import Testing
         )
     }
 
+    private func member(_ id: String) -> Components.Schemas.Member {
+        .init(
+            id: id, name: id.uppercased(), color: "#0a84ff", avatar: nil, birthday: nil,
+            choreReminderTime: nil, role: .kid, sortOrder: 0, hasPassword: false,
+            hasPasskeys: false, passwordResetRequired: false, createdAt: "2026-07-01T00:00:00Z"
+        )
+    }
+
     // MARK: Affordability
 
     @Test func affordableWhenBalanceCoversCost() {
@@ -53,24 +61,12 @@ import Testing
 
     // MARK: Visibility filtering
 
-    // D22: Done stays scoped — kids their own, admins the household's.
-    @Test func kidSeesOnlyTheirOwnDoneRedemptions() {
-        let all = [
-            redemption(id: "a", memberId: "kid", status: .fulfilled, fulfilledAt: "2026-07-27T09:00:00Z"),
-            redemption(id: "b", memberId: "sibling", status: .fulfilled, fulfilledAt: "2026-07-27T09:00:00Z"),
-            redemption(id: "c", memberId: "kid", status: .fulfilled, fulfilledAt: "2026-07-27T09:00:00Z"),
-        ]
-        let visible = RewardsLogic.doneVisible(all, memberID: "kid", isAdmin: false)
-        #expect(visible.map(\.id) == ["a", "c"])
-    }
-
-    @Test func adminSeesEveryonesDoneRedemptions() {
-        let all = [
-            redemption(id: "a", memberId: "kid", status: .fulfilled, fulfilledAt: "2026-07-27T09:00:00Z"),
-            redemption(id: "b", memberId: "sibling", status: .fulfilled, fulfilledAt: "2026-07-27T09:00:00Z"),
-        ]
-        let visible = RewardsLogic.doneVisible(all, memberID: "mom", isAdmin: true)
-        #expect(visible.map(\.id) == ["a", "b"])
+    // M9e-7: the return confirm gate — your own is instant, anyone
+    // else's (or a family session) asks first.
+    @Test func returnConfirmsForOtherMembersAndFamilySessions() {
+        #expect(!RewardsLogic.returnNeedsConfirm(redemptionMemberID: "kid", sessionMemberID: "kid"))
+        #expect(RewardsLogic.returnNeedsConfirm(redemptionMemberID: "kid", sessionMemberID: "mom"))
+        #expect(RewardsLogic.returnNeedsConfirm(redemptionMemberID: "kid", sessionMemberID: ""))
     }
 
     // D25: the waiting queue is household-visible to everyone — the split
@@ -103,10 +99,11 @@ import Testing
         #expect(RewardsLogic.doneLimit == "20")
     }
 
-    // D22: kids query Done with their own memberId; admins household-wide.
-    @Test func doneQueryScopesKidsToTheirOwnMemberId() {
-        #expect(RewardsLogic.doneMemberID(memberID: "kid", isAdmin: false) == "kid")
-        #expect(RewardsLogic.doneMemberID(memberID: "mom", isAdmin: true) == nil)
+    // M9e-7: the store turns personal only when exactly one member solos.
+    @Test func soloIDRequiresExactlyOneMember() {
+        #expect(RewardsLogic.soloID(effective: ["a"]) == "a")
+        #expect(RewardsLogic.soloID(effective: ["a", "b"]) == nil)
+        #expect(RewardsLogic.soloID(effective: []) == nil)
     }
 
     // MARK: Fulfill/return capability
@@ -131,12 +128,11 @@ import Testing
 
     // MARK: Redeem busy lock (D12)
 
-    // D12: while a redeem is in flight every card locks, even affordable ones.
-    @Test func storeLocksWhileRedeemInFlight() {
-        #expect(RewardsLogic.storeCardDisabled(starsShort: nil, redeemBusy: true))
-        #expect(RewardsLogic.storeCardDisabled(starsShort: 3, redeemBusy: false))
-        #expect(RewardsLogic.storeCardDisabled(starsShort: 3, redeemBusy: true))
-        #expect(!RewardsLogic.storeCardDisabled(starsShort: nil, redeemBusy: false))
+    // Mock: the who-picker lists currently-selected members first.
+    @Test func pickerOrderPutsSelectedMembersFirst() {
+        let members = [member("a"), member("b"), member("c")]
+        let order = RewardsLogic.pickerOrder(members: members, effective: ["c"])
+        #expect(order.map(\.id) == ["c", "a", "b"])
     }
 
     // MARK: Instant parsing (fulfilledAt)

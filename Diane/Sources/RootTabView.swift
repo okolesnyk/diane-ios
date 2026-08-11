@@ -206,25 +206,48 @@ struct ModuleScreen: View {
         }
     }
 
-    /// The one module with a destination of its own in the bar (owner
-    /// 2026-08-06: History goes up top; 2026-08-08: circled, so it reads
-    /// as a button beside the avatar).
+    /// Modules with a destination of their own in the bar (owner 2026-08-06:
+    /// History goes up top; 2026-08-08: circled, so it reads as a button
+    /// beside the avatar). Routines' clock opens the past 7 days — the same
+    /// idiom, but checkable, because there the past can still be fixed
+    /// (mock page 6).
     private var barAccessory: AnyView? {
-        guard module == .chores else { return nil }
-        return AnyView(
-            NavigationLink {
-                ChoreHistoryView(context: context)
-            } label: {
-                Image(systemName: "clock")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .frame(width: 32, height: 32)
-                    .overlay(Circle().strokeBorder(.quaternary, lineWidth: 1))
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("History")
-        )
+        switch module {
+        case .chores:
+            AnyView(barLink("History", systemImage: "clock") { ChoreHistoryView(context: context) })
+        case .routines:
+            AnyView(HStack(spacing: 8) {
+                if context.session.isAdmin {
+                    barLink("All routines", systemImage: "list.bullet") {
+                        ManageRoutinesView(context: context)
+                    }
+                }
+                barLink("Past 7 days", systemImage: "clock") {
+                    RoutinesPastView(context: context)
+                }
+            })
+        default:
+            nil
+        }
+    }
+
+    private func barLink(
+        _ label: String,
+        systemImage: String,
+        @ViewBuilder destination: @escaping () -> some View
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 32, height: 32)
+                .overlay(Circle().strokeBorder(.quaternary, lineWidth: 1))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     @ViewBuilder

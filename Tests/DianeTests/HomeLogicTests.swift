@@ -43,6 +43,7 @@ import Testing
     }
 
     private func entry(
+        routine: String = "r",
         member: String,
         windowStart: String = "06:00",
         windowEnd: String = "12:00",
@@ -50,7 +51,7 @@ import Testing
         done: Int = 0
     ) -> Components.Schemas.RoutineBoardEntry {
         Components.Schemas.RoutineBoardEntry(
-            routineId: "r-\(member)", title: "Routine", emoji: nil,
+            routineId: routine == "r" ? "r-\(member)" : routine, title: "Routine", emoji: nil,
             windowStart: windowStart, windowEnd: windowEnd, memberId: member,
             complete: open == 0, streak: 0,
             tasks: (0..<open).map { .init(taskId: "o\($0)", title: "t", starValue: 0, status: .open) }
@@ -122,30 +123,19 @@ import Testing
         #expect(line == nil)
     }
 
-    // MARK: Routines — running windows only, summed across the family
+    // MARK: Routines — the day's routine count, not tasks, not windows
 
-    @Test func routinesSumOpenTasksAcrossRunningWindows() {
+    @Test func routinesCountUniqueRoutinesForTheWholeDay() {
         let board = [
-            entry(member: "a", open: 2, done: 1),
-            entry(member: "b", open: 1),
-            entry(member: "a", windowStart: "18:00", windowEnd: "21:00", open: 5),
+            entry(routine: "morning", member: "a", open: 2, done: 1),
+            entry(routine: "morning", member: "b", open: 1),  // shared = ONE routine
+            entry(routine: "evening", member: "a", windowStart: "18:00", windowEnd: "21:00", open: 5),
         ]
-        let line = HomeLogic.routinesLine(board: board, minute: "09:30")
-        #expect(line == HomeLogic.Line(count: "3 left"))
-        // The evening window isn't running at 09:30; at 18:00 it is (start
-        // inclusive) and the morning ones are over (end exclusive covers
-        // 12:00 exactly).
-        let evening = HomeLogic.routinesLine(board: board, minute: "18:00")
-        #expect(evening == HomeLogic.Line(count: "5 left"))
-        let noon = HomeLogic.routinesLine(board: board, minute: "12:00")
-        #expect(noon == nil)
-    }
-
-    @Test func routinesAllDoneIsAQuietDoor() {
-        let done = HomeLogic.routinesLine(
-            board: [entry(member: "a", open: 0, done: 3)], minute: "09:30"
-        )
-        #expect(done == nil)
+        #expect(HomeLogic.routinesLine(board: board) == HomeLogic.Line(count: "2 today"))
+        // Done or not, in-window or not — the count holds all day.
+        let allDone = [entry(routine: "morning", member: "a", open: 0, done: 3)]
+        #expect(HomeLogic.routinesLine(board: allDone) == HomeLogic.Line(count: "1 today"))
+        #expect(HomeLogic.routinesLine(board: []) == nil)
     }
 
     // MARK: Rewards — a household count, quiet at zero
@@ -166,7 +156,7 @@ import Testing
         let pulse = HomeLogic.pulse(snapshot, today: "2026-08-10", minute: "09:00", timeZone: utc)
         #expect(pulse.line(for: .calendar) == HomeLogic.Line(count: "1 today"))
         #expect(pulse.line(for: .chores) == HomeLogic.Line(count: "1 open"))
-        #expect(pulse.line(for: .routines) == HomeLogic.Line(count: "1 left"))
+        #expect(pulse.line(for: .routines) == HomeLogic.Line(count: "1 today"))
         #expect(pulse.line(for: .rewards) == HomeLogic.Line(count: "1 waiting"))
     }
 }

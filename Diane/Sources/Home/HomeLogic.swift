@@ -57,7 +57,7 @@ enum HomeLogic {
         Pulse(
             calendar: calendarLine(events: snapshot.events, today: today, timeZone: timeZone),
             chores: choresLine(chores: snapshot.chores, today: today, minute: minute),
-            routines: routinesLine(board: snapshot.board, minute: minute),
+            routines: routinesLine(board: snapshot.board),
             rewards: rewardsLine(waiting: snapshot.waiting)
         )
     }
@@ -89,23 +89,13 @@ enum HomeLogic {
         return Line(count: "\(open) open", late: late > 0 ? "\(late) late" : nil)
     }
 
-    /// "3 left" — open tasks on board entries whose window is RUNNING at
-    /// `minute` (start inclusive, end exclusive), summed across the family.
-    /// Outside every window, or with nothing left, the door stays quiet.
-    static func routinesLine(
-        board: [Components.Schemas.RoutineBoardEntry],
-        minute: String
-    ) -> Line? {
-        guard let now = TimeLogic.minutes(minute) else { return nil }
-        let left = board
-            .filter { entry in
-                guard let start = TimeLogic.minutes(entry.windowStart),
-                      let end = TimeLogic.minutes(entry.windowEnd)
-                else { return false }
-                return start <= now && now < end
-            }
-            .reduce(0) { $0 + $1.tasks.count(where: { $0.status == .open }) }
-        return left > 0 ? Line(count: "\(left) left") : nil
+    /// "3 today" — how many family ROUTINES are scheduled today (owner
+    /// 2026-08-10: "just a number of family routines today", not tasks, not
+    /// windows). A shared routine counts once, whoever it belongs to; the
+    /// count holds all day. No routines scheduled → a quiet door.
+    static func routinesLine(board: [Components.Schemas.RoutineBoardEntry]) -> Line? {
+        let count = Set(board.map(\.routineId)).count
+        return count > 0 ? Line(count: "\(count) today") : nil
     }
 
     /// "1 waiting" — redemptions awaiting a parent, household-wide.

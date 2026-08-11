@@ -95,7 +95,11 @@ enum ChoreHistoryLogic {
     static func undoPrompt(_ row: Row, names: [String: String]) -> String {
         let lead = row.lead
         if lead.action == .dismissed { return "Bring \(lead.title) back?" }
+        // Dedup: one member behind several occurrences must read once,
+        // never "Alex, Alex & Alex" (owner screenshot 2026-08-10).
+        var seen = Set<String>()
         let crew = row.entries.compactMap { actor($0).flatMap { names[$0] } }
+            .filter { seen.insert($0).inserted }
         let who = crew.isEmpty ? "their" : joinNames(crew)
         let checks = crew.count > 1 ? "checks" : "check"
         guard lead.starsAwarded > 0 else { return "Undo \(who)'s \(checks)?" }

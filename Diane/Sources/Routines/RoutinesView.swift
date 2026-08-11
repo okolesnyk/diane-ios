@@ -157,54 +157,65 @@ extension Components.Schemas.RoutineBoardEntry {
     }
 }
 
-// MARK: - Screen
+// MARK: - Screen (M9e-7, mock page 6 rev 3: the FAMILY board)
 
+/// Family cards — one routine x one member — bucketed Now / Later today /
+/// Earlier today. Live-window cards come expanded, everything else folds;
+/// windows are display, not locks. Stars credit the CARD's member (owner-
+/// not-tapper, the Chores verdict); cross-member reverts confirm. The chip
+/// row is the day pages' filter (rings = today's routine progress; the red
+/// dot = a closed window still holding open tasks). Yesterday lives behind
+/// the clock in the bar (RoutinesPastView).
 @MainActor
 struct RoutinesView: View {
     let context: SignedInContext
     @Environment(SyncSignals.self) private var signals
     @Environment(AppState.self) private var appState
     @Environment(HouseholdClock.self) private var clock  // D03
+    @Environment(MemberFilterStore.self) private var filter
+
+    /// Member tint — the device-local display pref (owner rule 2026-08-05).
+    @AppStorage("memberTint") private var tintOn = true
 
     @State private var board: Loadable<Components.Schemas.RoutineBoard> = .loading
     @State private var members: [Components.Schemas.Member] = []
     @State private var busyTaskIds: Set<String> = []
     @State private var actionError: String?
     @State private var activeSheet: ActiveSheet?
+    /// Fold state by card key; nil until the first load seeds the default
+    /// (live-window cards open) — after that the user owns it.
+    @State private var expandedCards: Set<String>?
+    @State private var pendingRevert: PendingRevert?
 
-    /// One sheet driver: detail, create, and the admin Manage list.
+    struct PendingRevert: Identifiable {
+        let entry: Components.Schemas.RoutineBoardEntry
+        let task: Components.Schemas.RoutineBoardEntry.TasksPayloadPayload
+        let reopensSkip: Bool
+        var id: String { task.taskId }
+    }
+
+    /// One sheet driver: detail and create (All routines is a pushed view).
     enum ActiveSheet: Identifiable {
         case detail(entry: Components.Schemas.RoutineBoardEntry, boardDate: String)
         case create
-        case manage
 
         var id: String {
             switch self {
             case .detail(let entry, _): "detail-\(entry.routineId)-\(entry.memberId)"
             case .create: "create"
-            case .manage: "manage"
             }
         }
     }
 
+    private var allIDs: [String] { members.map(\.id) }
+    private var effective: Set<String> { filter.effective(all: allIDs) }
+
     var body: some View {
-        Group { // M9e: the caller owns the NavigationStack (tab wrap or Apps push)
+        Group { // M9e: the caller owns the NavigationStack (tab wrap or Home push)
             content
-                .navigationTitle("Routines")
                 // D04: clock.today in the key refetches at household midnight.
-                .task(id: "\(signals.version(of: [.routines, .stars]))|\(clock.today)") { await load() }
+                .task(id: "\(signals.version(of: [.routines, .stars, .members]))|\(clock.today)") { await load() }
                 .refreshable { await load() }
-                .toolbar {
-                    // Server enforces admin on routines CRUD; gate the UI too.
-                    if context.session.isAdmin {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button("Manage") { activeSheet = .manage }
-                        }
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("New routine", systemImage: "plus") { activeSheet = .create }
-                        }
-                    }
-                }
                 .sheet(item: $activeSheet) { sheet in
                     switch sheet {
                     case .detail(let entry, let boardDate):
@@ -219,11 +230,28 @@ struct RoutinesView: View {
                         RoutineFormView(context: context, members: members, mode: .create) {
                             Task { await load() }
                         }
-                    case .manage:
-                        ManageRoutinesView(context: context, members: members) {
-                            Task { await load() }
-                        }
                     }
+                }
+                // .alert, not confirmationDialog: iOS 26 anchors dialogs to their
+        // source with a pointer bubble — the owner wants a plain centered
+        // modal (2026-08-09, re-affirmed 2026-08-10).
+        .alert(
+                    pendingRevert.map { revertTitle($0) } ?? "",
+                    isPresented: Binding(
+                        get: { pendingRevert != nil },
+                        set: { if !$0 { pendingRevert = nil } }
+                    ),
+                ) {
+                    if let pending = pendingRevert {
+                        Button(pending.reopensSkip ? "Reopen task" : "Undo check", role: .destructive) {
+                            let target = pending
+                            pendingRevert = nil
+                            Task { await perform(.undo, on: target.task, entry: target.entry) }
+                        }
+                        Button("Cancel", role: .cancel) { pendingRevert = nil }
+                    }
+                } message: {
+                    if let pending = pendingRevert { Text(revertMessage(pending)) }
                 }
                 .alert(
                     "Routines",
@@ -253,71 +281,232 @@ struct RoutinesView: View {
                 Button("Try again") { Task { await load() } }
             }
         case .loaded(let loadedBoard):
-            let mine = RoutinesBoardLogic.mine(
-                loadedBoard.entries, memberId: context.session.memberID
-            )
-            if mine.isEmpty {
-                ContentUnavailableView(
-                    "No routines scheduled today.",
-                    systemImage: "sparkles",
-                    description: Text("Enjoy!")
-                )
-            } else {
+            VStack(spacing: 0) {
+                chips(entries: loadedBoard.entries)
                 // D03: phase math on the household wall clock, not the
                 // device's; reading clock.minute re-renders every tick.
-                boardList(entries: mine, now: clock.minute, date: loadedBoard.date)
+                boardList(entries: loadedBoard.entries, now: clock.minute, date: loadedBoard.date)
             }
         }
     }
 
-    /// M9c: one plain, edge-to-edge List — each routine is a Section whose
-    /// header carries the identity, phase ordering (Now → Later → Earlier)
-    /// still drives the order.
+    // MARK: - Chips (the day pages' row; rings = today's routine progress)
+
+    private func chips(entries: [Components.Schemas.RoutineBoardEntry]) -> some View {
+        HStack(spacing: 14) {
+            ForEach(members, id: \.id) { member in
+                memberChip(member, entries: entries)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+    }
+
+    private func memberChip(
+        _ member: Components.Schemas.Member,
+        entries: [Components.Schemas.RoutineBoardEntry]
+    ) -> some View {
+        let isOn = effective.contains(member.id)
+        let progress = RoutinesPageLogic.progress(for: member.id, entries: entries)
+        let late = RoutinesPageLogic.hasLate(memberID: member.id, entries: entries, now: clock.minute)
+        return VStack(spacing: 3) {
+            ZStack {
+                Circle().stroke(Color.secondary.opacity(0.2), lineWidth: 3)
+                Circle()
+                    .trim(from: 0, to: progress)
+                    .stroke(
+                        Color(hex: member.color),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))
+                MemberAvatarView(
+                    name: member.name,
+                    colorHex: member.color,
+                    avatar: member.avatar,
+                    size: 38
+                )
+                if late {
+                    Circle().fill(.red).frame(width: 8, height: 8).offset(x: 16, y: -16)
+                }
+            }
+            .frame(width: 46, height: 46)
+            Text(member.name).font(.caption2).lineLimit(1)
+        }
+        .opacity(isOn ? 1 : 0.35)
+        .contentShape(Rectangle())
+        // Double-tap OR long-press solos — both on trial (owner 2026-08-08).
+        // No Anyone chip: routines always belong to somebody.
+        .onTapGesture(count: 2) { filter.solo(member.id) }
+        .onTapGesture { filter.toggle(member.id, all: allIDs) }
+        .onLongPressGesture { filter.solo(member.id) }
+        .accessibilityLabel(
+            "\(member.name), \(Int(progress * 100)) percent of today's routines done\(late ? ", has an open window that closed" : "")"
+        )
+    }
+
+    // MARK: - The bucketed board
+
     private func boardList(
         entries: [Components.Schemas.RoutineBoardEntry],
         now: String,
         date: String
     ) -> some View {
-        List {
-            ForEach(RoutinesBoardLogic.sections(for: entries, now: now), id: \.phase) { section in
-                ForEach(section.entries, id: \.routineId) { entry in
-                    Section {
-                        if entry.tasks.isEmpty {
-                            Text("No tasks in this routine yet.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .listRowInsets(RoutinesBoardLogic.rowInsets)
-                        } else {
-                            ForEach(entry.tasks, id: \.taskId) { task in
-                                RoutineTaskRow(
-                                    task: task,
-                                    busy: busyTaskIds.contains(task.taskId),
-                                    onAction: { action in Task { await perform(action, on: task) } }
-                                )
-                                .listRowInsets(RoutinesBoardLogic.rowInsets)
-                            }
-                        }
-                    } header: {
-                        RoutineSectionHeader(
-                            entry: entry,
-                            phase: section.phase,
-                            onTap: { activeSheet = .detail(entry: entry, boardDate: date) }
-                        )
-                        .listRowInsets(RoutinesBoardLogic.rowInsets)
-                        .textCase(nil)  // The routine title is not a shouty label.
+        let buckets = RoutinesPageLogic.buckets(entries: entries, now: now, selected: effective)
+        let expanded = expandedCards ?? RoutinesPageLogic.defaultExpanded(entries: entries, now: now)
+        return List {
+            ForEach(buckets, id: \.phase) { bucket in
+                Section {
+                    // Keyed by the whole entry: a shared routine is one card
+                    // PER member, and routineId alone collides.
+                    ForEach(bucket.entries, id: \.self) { entry in
+                        card(entry, phase: bucket.phase, date: date, expanded: expanded)
                     }
+                } header: {
+                    Text(bucket.label)
+                        .font(.caption.weight(.semibold))
                 }
+            }
+            if buckets.isEmpty {
+                Text("No routines for this filter — the dotted row makes one.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(RoutinesBoardLogic.rowInsets)
+            }
+            if context.session.isAdmin {
+                Button {
+                    activeSheet = .create
+                } label: {
+                    GhostLabel(title: "New routine")
+                }
+                .buttonStyle(.plain)
+                .listRowSeparator(.hidden)
+                .listRowInsets(RoutinesBoardLogic.rowInsets)
             }
         }
         .listStyle(.plain)
         .contentMargins(.top, 0, for: .scrollContent)
     }
 
+    /// One card: the fold header, then the task rows while expanded. The
+    /// header row wears the member wash (main row only, the Today rule).
+    @ViewBuilder
+    private func card(
+        _ entry: Components.Schemas.RoutineBoardEntry,
+        phase: RoutinesBoardLogic.Phase,
+        date: String,
+        expanded: Set<String>
+    ) -> some View {
+        let key = RoutinesPageLogic.cardKey(entry)
+        let open = expanded.contains(key)
+        let sub = RoutinesPageLogic.sub(entry, phase: phase)
+        let streak = RoutinesPageLogic.displayedStreak(entry)
+
+        HStack(spacing: 8) {
+            Button {
+                var next = expanded
+                if open { next.remove(key) } else { next.insert(key) }
+                withAnimation(.snappy) { expandedCards = next }
+            } label: {
+                HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(entry.title).font(.body.weight(.semibold))
+                        subText(sub)
+                    }
+                    Spacer(minLength: 6)
+                    if RoutinesBoardLogic.showsStreakBadge(streak) {
+                        Text("🔥 \(streak)").font(.subheadline)
+                    }
+                    avatar(for: entry.memberId)
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(open ? 180 : 0))
+                }
+                .padding(.vertical, 4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(cardLabel(entry, sub: sub, open: open))
+            Button {
+                activeSheet = .detail(entry: entry, boardDate: date)
+            } label: {
+                Image(systemName: "info.circle")
+                    .font(.body)
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 32, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(entry.title) routine details")
+        }
+        .listRowInsets(RoutinesBoardLogic.rowInsets)
+        .listRowBackground(cardWash(for: entry.memberId))
+
+        if open {
+            if entry.tasks.isEmpty {
+                Text("No tasks yet — a routine needs at least one.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .listRowInsets(RoutinesBoardLogic.rowInsets)
+                    .listRowSeparator(.hidden)
+            } else {
+                ForEach(entry.tasks, id: \.taskId) { task in
+                    RoutineTaskRow(
+                        task: task,
+                        busy: busyTaskIds.contains(task.taskId),
+                        onAction: { action in requestAction(action, on: task, entry: entry) }
+                    )
+                    .listRowInsets(RoutinesBoardLogic.rowInsets)
+                    .listRowSeparator(.hidden)
+                }
+            }
+        }
+    }
+
+    private func subText(_ sub: RoutinesPageLogic.Sub) -> some View {
+        var text = Text(sub.text)
+        if sub.done { text = text.foregroundStyle(.green) }
+        if sub.stillOpen > 0 {
+            text = text + Text(" · ")
+                + Text("\(sub.stillOpen) still open").foregroundStyle(.red).fontWeight(.semibold)
+        }
+        return text.font(.caption).foregroundStyle(sub.done ? .green : .secondary).monospacedDigit()
+    }
+
+    private func cardLabel(
+        _ entry: Components.Schemas.RoutineBoardEntry,
+        sub: RoutinesPageLogic.Sub,
+        open: Bool
+    ) -> String {
+        let who = members.first(where: { $0.id == entry.memberId })?.name ?? ""
+        let still = sub.stillOpen > 0 ? ", \(sub.stillOpen) still open" : ""
+        return "\(entry.title) — \(who), \(sub.text)\(still), \(open ? "expanded" : "collapsed")"
+    }
+
+    private func avatar(for memberID: String) -> some View {
+        Group {
+            if let member = members.first(where: { $0.id == memberID }) {
+                MemberAvatarView(
+                    name: member.name, colorHex: member.color, avatar: member.avatar, size: 24
+                )
+            }
+        }
+    }
+
+    /// Solid wash — a routine card has exactly one member (mock rule).
+    @ViewBuilder
+    private func cardWash(for memberID: String) -> some View {
+        if tintOn, let member = members.first(where: { $0.id == memberID }) {
+            Color(hex: member.color).opacity(0.1)
+        }
+    }
+
     // MARK: Data
 
     private func load() async {
         do {
-            // Members ride along for the detail sheet's avatar/name lookups.
             async let boardCall = context.client.api.getRoutineBoard(.init())
             async let membersCall = context.client.api.listMembers(.init())
             let (boardOut, membersOut) = try await (boardCall, membersCall)
@@ -328,7 +517,13 @@ struct RoutinesView: View {
                 fail("Something went wrong loading routines.")
                 return
             }
-            board = .loaded(try boardOK.body.json)
+            let loaded = try boardOK.body.json
+            if expandedCards == nil {
+                expandedCards = RoutinesPageLogic.defaultExpanded(
+                    entries: loaded.entries, now: clock.minute
+                )
+            }
+            board = .loaded(loaded)
             members = try membersOK.body.json.members
         } catch {
             guard !isTaskCancellation(error) else { return }  // D08
@@ -347,9 +542,48 @@ struct RoutinesView: View {
         case undo
     }
 
+    /// The confirm gate: completing and skipping are always instant; a
+    /// revert of someone ELSE's check or skip asks first (a skip guards
+    /// their completed day). Your own reverts are instant.
+    private func requestAction(
+        _ action: TaskAction,
+        on task: Components.Schemas.RoutineBoardEntry.TasksPayloadPayload,
+        entry: Components.Schemas.RoutineBoardEntry
+    ) {
+        if action == .undo,
+           RoutinesPageLogic.revertNeedsConfirm(
+               cardMemberID: entry.memberId, sessionMemberID: context.session.memberID
+           ) {
+            pendingRevert = PendingRevert(
+                entry: entry, task: task, reopensSkip: task.status == .skipped
+            )
+            return
+        }
+        Task { await perform(action, on: task, entry: entry) }
+    }
+
+    private func revertTitle(_ pending: PendingRevert) -> String {
+        let who = members.first(where: { $0.id == pending.entry.memberId })?.name ?? "their"
+        return pending.reopensSkip
+            ? "Reopen \(who)'s skipped task?"
+            : "Undo \(who)'s check?"
+    }
+
+    private func revertMessage(_ pending: PendingRevert) -> String {
+        let who = members.first(where: { $0.id == pending.entry.memberId })?.name ?? "They"
+        if pending.reopensSkip {
+            return "\"\(pending.task.title)\" won't count as done until it's finished or re-skipped today. No stars move."
+        }
+        let stars = pending.task.starValue
+        return stars > 0 ? "\(who) loses ★ \(stars)." : "No stars move."
+    }
+
+    /// Acts AS the card's member (owner-not-tapper — the Chores verdict):
+    /// stars land with whoever the routine belongs to.
     private func perform(
         _ action: TaskAction,
-        on task: Components.Schemas.RoutineBoardEntry.TasksPayloadPayload
+        on task: Components.Schemas.RoutineBoardEntry.TasksPayloadPayload,
+        entry: Components.Schemas.RoutineBoardEntry
     ) async {
         guard let date = board.value?.date, !busyTaskIds.contains(task.taskId) else { return }
         // D04: never POST a stale board date — a 12:02 AM tap must not
@@ -360,7 +594,7 @@ struct RoutinesView: View {
         }
         busyTaskIds.insert(task.taskId)
         defer { busyTaskIds.remove(task.taskId) }
-        let body = Components.Schemas.RoutineTaskAction(date: date, memberId: context.session.memberID)
+        let body = Components.Schemas.RoutineTaskAction(date: date, memberId: entry.memberId)
         do {
             switch action {
             case .complete:
@@ -437,75 +671,275 @@ struct RoutinesView: View {
     }
 }
 
-// MARK: - Routine section header
+// MARK: - The past 7 days ("yesterday got away from us" — the heal screen)
 
-/// The routine's identity row — replaces the old card chrome. Tapping it (not
-/// the task rows) still opens the detail sheet.
-private struct RoutineSectionHeader: View {
-    let entry: Components.Schemas.RoutineBoardEntry
-    let phase: RoutinesBoardLogic.Phase
-    let onTap: () -> Void
+/// Chores' History idiom, but CHECKABLE: the engine takes backfill up to 7
+/// days and recomputes the streak, so every circle here is live. Actions
+/// post their day's date and act as the card's member.
+@MainActor
+struct RoutinesPastView: View {
+    let context: SignedInContext
+    @Environment(AppState.self) private var appState
+    @Environment(HouseholdClock.self) private var clock
+
+    @State private var days: Loadable<[(date: String, entries: [Components.Schemas.RoutineBoardEntry])]> = .loading
+    @State private var members: [Components.Schemas.Member] = []
+    @State private var busyKeys: Set<String> = []
+    @State private var actionError: String?
+    @State private var expanded: Set<String> = []
+    @State private var pendingRevert: RoutinesView.PendingRevert?
+    @State private var pendingRevertDate = ""
 
     var body: some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 10) {
-                    EmojiView(emoji: entry.emoji, font: .title2)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(entry.title)
-                            .font(.headline)
-                            .fontDesign(.rounded)
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        Text(RoutinesBoardLogic.headerCaption(
-                            windowStart: entry.windowStart,
-                            windowEnd: entry.windowEnd,
-                            phase: phase
-                        ))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                    }
-                    Spacer(minLength: 6)
-                    if phase == .now { nowPill }
-                    if RoutinesBoardLogic.showsStreakBadge(entry.streak) {
-                        Text("🔥\(entry.streak)")
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    if entry.complete {
-                        Text("All done ✓")
-                            .font(.caption.weight(.semibold))
-                            .fontDesign(.rounded)
-                            .foregroundStyle(.green)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(.green.opacity(0.12), in: .capsule)
-                    }
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+        content
+            .navigationTitle("Past 7 days")
+            .navigationBarTitleDisplayMode(.inline)
+            .task { await load() }
+            .refreshable { await load() }
+        // .alert, not confirmationDialog: iOS 26 anchors dialogs to their
+        // source with a pointer bubble — the owner wants a plain centered
+        // modal (2026-08-09, re-affirmed 2026-08-10).
+        .alert(
+            pendingRevert.map { revertTitle($0) } ?? "",
+            isPresented: Binding(
+                get: { pendingRevert != nil },
+                set: { if !$0 { pendingRevert = nil } }
+            ),
+        ) {
+            if let pending = pendingRevert {
+                Button(pending.reopensSkip ? "Reopen task" : "Undo check", role: .destructive) {
+                    let target = pending
+                    let date = pendingRevertDate
+                    pendingRevert = nil
+                    Task { await act(.undo, task: target.task, entry: target.entry, date: date) }
                 }
-                ProgressView(value: RoutinesBoardLogic.progress(of: entry))
-                    .tint(entry.complete ? .green : .cyan)
+                Button("Cancel", role: .cancel) { pendingRevert = nil }
             }
-            .frame(minHeight: RoutinesBoardLogic.tapTarget)  // D27
-            .contentShape(.rect)
+        } message: {
+            if let pending = pendingRevert {
+                Text(pending.reopensSkip
+                    ? "\"\(pending.task.title)\" won't count as done for that day until it's finished again."
+                    : "The stars from that day come back off.")
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Show \(entry.title) details")
+        .alert(
+            "Past 7 days",
+            isPresented: Binding(
+                get: { actionError != nil },
+                set: { if !$0 { actionError = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(actionError ?? "")
+        }
     }
 
-    /// The one badge the phase headings used to carry.
-    private var nowPill: some View {
-        Text("Now")
-            .font(.caption2.weight(.bold))
-            .fontDesign(.rounded)
-            .foregroundStyle(.cyan)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(.cyan.opacity(0.15), in: .capsule)
+    @ViewBuilder private var content: some View {
+        switch days {
+        case .loading:
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .failed(let message):
+            ContentUnavailableView {
+                Label("Can't load the past days", systemImage: "wifi.exclamationmark")
+            } description: {
+                Text(message)
+            } actions: {
+                Button("Try again") { Task { await load() } }
+            }
+        case .loaded(let loaded):
+            if loaded.allSatisfy(\.entries.isEmpty) {
+                ContentUnavailableView(
+                    "Nothing scheduled in the past week.",
+                    systemImage: "clock",
+                    description: Text("Routines land here once their day has passed.")
+                )
+            } else {
+                List {
+                    ForEach(loaded.filter { !$0.entries.isEmpty }, id: \.date) { day in
+                        Section {
+                            ForEach(day.entries, id: \.self) { entry in
+                                pastCard(entry, date: day.date)
+                            }
+                        } header: {
+                            Text(dayLabel(day.date)).font(.caption.weight(.semibold))
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .contentMargins(.top, 0, for: .scrollContent)
+            }
+        }
+    }
+
+    private func dayLabel(_ date: String) -> String {
+        let title = NavigationLogic.dayTitle(for: date)
+        return date == DayLogic.addDays(clock.today, -1) ? "Yesterday — \(title)" : title
+    }
+
+    @ViewBuilder
+    private func pastCard(
+        _ entry: Components.Schemas.RoutineBoardEntry,
+        date: String
+    ) -> some View {
+        let key = "\(date)|\(RoutinesPageLogic.cardKey(entry))"
+        let counted = entry.tasks.count(where: { $0.status != .open })
+        let total = entry.tasks.count
+        let complete = total > 0 && counted == total
+        let open = expanded.contains(key) || (!complete && !expanded.contains("closed|\(key)"))
+
+        Button {
+            withAnimation(.snappy) {
+                if open {
+                    expanded.remove(key)
+                    if !complete { expanded.insert("closed|\(key)") }
+                } else {
+                    expanded.insert(key)
+                    expanded.remove("closed|\(key)")
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(entry.title).font(.body.weight(.semibold))
+                    pastSub(counted: counted, total: total, complete: complete)
+                }
+                Spacer(minLength: 6)
+                avatar(for: entry.memberId)
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(open ? 180 : 0))
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(entry.title), \(counted) of \(total) done, \(open ? "expanded" : "collapsed")")
+        .listRowInsets(RoutinesBoardLogic.rowInsets)
+
+        if open {
+            ForEach(entry.tasks, id: \.taskId) { task in
+                RoutineTaskRow(
+                    task: task,
+                    busy: busyKeys.contains("\(date)|\(task.taskId)"),
+                    onAction: { action in request(action, task: task, entry: entry, date: date) }
+                )
+                .listRowInsets(RoutinesBoardLogic.rowInsets)
+                .listRowSeparator(.hidden)
+            }
+        }
+    }
+
+    private func pastSub(counted: Int, total: Int, complete: Bool) -> some View {
+        Group {
+            if complete {
+                Text("All \(total) done ✓").foregroundStyle(.green)
+            } else {
+                Text("\(counted) of \(total) · ")
+                    + Text("\(total - counted) still open").foregroundStyle(.red).fontWeight(.semibold)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .monospacedDigit()
+    }
+
+    private func avatar(for memberID: String) -> some View {
+        Group {
+            if let member = members.first(where: { $0.id == memberID }) {
+                MemberAvatarView(
+                    name: member.name, colorHex: member.color, avatar: member.avatar, size: 24
+                )
+            }
+        }
+    }
+
+    private func revertTitle(_ pending: RoutinesView.PendingRevert) -> String {
+        let who = members.first(where: { $0.id == pending.entry.memberId })?.name ?? "their"
+        return pending.reopensSkip ? "Reopen \(who)'s skipped task?" : "Undo \(who)'s check?"
+    }
+
+    private func request(
+        _ action: RoutinesView.TaskAction,
+        task: Components.Schemas.RoutineBoardEntry.TasksPayloadPayload,
+        entry: Components.Schemas.RoutineBoardEntry,
+        date: String
+    ) {
+        if action == .undo,
+           RoutinesPageLogic.revertNeedsConfirm(
+               cardMemberID: entry.memberId, sessionMemberID: context.session.memberID
+           ) {
+            pendingRevert = RoutinesView.PendingRevert(
+                entry: entry, task: task, reopensSkip: task.status == .skipped
+            )
+            pendingRevertDate = date
+            return
+        }
+        Task { await act(action, task: task, entry: entry, date: date) }
+    }
+
+    private func act(
+        _ action: RoutinesView.TaskAction,
+        task: Components.Schemas.RoutineBoardEntry.TasksPayloadPayload,
+        entry: Components.Schemas.RoutineBoardEntry,
+        date: String
+    ) async {
+        let busyKey = "\(date)|\(task.taskId)"
+        guard !busyKeys.contains(busyKey) else { return }
+        busyKeys.insert(busyKey)
+        defer { busyKeys.remove(busyKey) }
+        let body = Components.Schemas.RoutineTaskAction(date: date, memberId: entry.memberId)
+        do {
+            let outcome: Bool
+            switch action {
+            case .complete:
+                outcome = if case .ok = try await context.client.api.completeRoutineTask(
+                    .init(path: .init(id: task.taskId), body: .json(body))
+                ) { true } else { false }
+            case .skip:
+                outcome = if case .ok = try await context.client.api.skipRoutineTask(
+                    .init(path: .init(id: task.taskId), body: .json(body))
+                ) { true } else { false }
+            case .undo:
+                outcome = if case .ok = try await context.client.api.uncompleteRoutineTask(
+                    .init(path: .init(id: task.taskId), body: .json(body))
+                ) { true } else { false }
+            }
+            if outcome {
+                await load()
+            } else {
+                actionError = "That check didn't land — the day may be out of the 7-day window."
+                await load()
+            }
+        } catch {
+            guard !isTaskCancellation(error) else { return }
+            actionError = "Couldn't reach your home server."
+        }
+    }
+
+    private func load() async {
+        do {
+            async let membersCall = context.client.api.listMembers(.init())
+            var loaded: [(date: String, entries: [Components.Schemas.RoutineBoardEntry])] = []
+            for date in RoutinesPageLogic.pastDays(today: clock.today) {
+                guard case .ok(let ok) = try await context.client.api.getRoutineBoard(
+                    .init(query: .init(date: date))
+                ) else { continue }
+                loaded.append((date: date, entries: try ok.body.json.entries))
+            }
+            if case .ok(let membersOK) = try await membersCall {
+                members = try membersOK.body.json.members
+            }
+            days = .loaded(loaded)
+        } catch {
+            guard !isTaskCancellation(error) else { return }
+            if days.value == nil { days = .failed("Couldn't reach your home server.") }
+        }
     }
 }
+
+// MARK: - Task row (the family row DNA: circle leading, star trailing)
 
 private struct RoutineTaskRow: View {
     let task: Components.Schemas.RoutineBoardEntry.TasksPayloadPayload
@@ -514,15 +948,15 @@ private struct RoutineTaskRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
+            statusControl
             EmojiView(emoji: task.emoji, font: .body)
             VStack(alignment: .leading, spacing: 0) {
                 Text(task.title)
                     .font(.subheadline)
-                    .fontDesign(.rounded)
                     .strikethrough(task.status == .completed)
                     .foregroundStyle(task.status == .open ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                 if task.status == .skipped {
-                    Text("skipped")
+                    Text("Skipped — streak safe")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
@@ -533,7 +967,6 @@ private struct RoutineTaskRow: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.orange)
             }
-            statusControl
         }
         .contentShape(.rect)
         // M9c: circle completes, swipe does the rest — no inline Skip/Un-do.
@@ -577,7 +1010,7 @@ private struct RoutineTaskRow: View {
         case .completed:
             circleButton("checkmark.circle.fill", style: AnyShapeStyle(.green), action: .undo, label: "Un-do \(task.title)")
         case .skipped:
-            circleButton("minus.circle", style: AnyShapeStyle(.secondary), action: .undo, label: "Un-do skip of \(task.title)")
+            circleButton("minus.circle", style: AnyShapeStyle(.orange), action: .undo, label: "Un-do skip of \(task.title)")
         }
     }
 
@@ -622,16 +1055,15 @@ private struct EmojiView: View {
 
 /// Every routine definition (web's All-routines parity) — the only route to
 /// edit a routine with no card on today's board, or another member's.
+/// A PUSHED dedicated view beside the History clock (owner 2026-08-10).
 @MainActor
-private struct ManageRoutinesView: View {
+struct ManageRoutinesView: View {
     let context: SignedInContext
-    let members: [Components.Schemas.Member]
-    let onChanged: () -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
 
     @State private var routines: Loadable<[Components.Schemas.Routine]> = .loading
+    @State private var members: [Components.Schemas.Member] = []
     @State private var editing: EditTarget?
 
     private struct EditTarget: Identifiable {
@@ -640,28 +1072,20 @@ private struct ManageRoutinesView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            content
-                .navigationTitle("All routines")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { dismiss() }
-                    }
+        content
+            .navigationTitle("All routines")
+            .navigationBarTitleDisplayMode(.inline)
+            .task { await load() }
+            .refreshable { await load() }
+            .sheet(item: $editing) { target in
+                RoutineFormView(
+                    context: context,
+                    members: members,
+                    mode: .edit(routineId: target.routineId)
+                ) {
+                    Task { await load() }
                 }
-                .task { await load() }
-                .refreshable { await load() }
-                .sheet(item: $editing) { target in
-                    RoutineFormView(
-                        context: context,
-                        members: members,
-                        mode: .edit(routineId: target.routineId)
-                    ) {
-                        onChanged()
-                        Task { await load() }
-                    }
-                }
-        }
+            }
     }
 
     @ViewBuilder private var content: some View {
@@ -682,7 +1106,7 @@ private struct ManageRoutinesView: View {
                 ContentUnavailableView(
                     "No routines yet.",
                     systemImage: "sparkles",
-                    description: Text("Tap + on the Routines screen to create one.")
+                    description: Text("The dotted row on the Routines page creates one.")
                 )
             } else {
                 List(list, id: \.id) { routine in
@@ -690,7 +1114,7 @@ private struct ManageRoutinesView: View {
                         .listRowInsets(RoutinesBoardLogic.rowInsets)
                 }
                 .listStyle(.plain)
-        .contentMargins(.top, 0, for: .scrollContent)
+                .contentMargins(.top, 0, for: .scrollContent)
             }
         }
     }
@@ -704,7 +1128,6 @@ private struct ManageRoutinesView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(routine.title)
                         .font(.headline)
-                        .fontDesign(.rounded)
                     Text(RoutinesManageLogic.subtitle(
                         windowStart: routine.windowStart,
                         windowEnd: routine.windowEnd,
@@ -728,6 +1151,7 @@ private struct ManageRoutinesView: View {
 
     private func load() async {
         do {
+            async let membersCall = context.client.api.listMembers(.init())
             switch try await context.client.api.listRoutines(.init()) {
             case .ok(let ok):
                 routines = .loaded(RoutinesManageLogic.sorted(try ok.body.json.routines))
@@ -735,6 +1159,9 @@ private struct ManageRoutinesView: View {
                 appState.handleUnauthorized()
             default:
                 if routines.value == nil { routines = .failed("The routines didn't load.") }
+            }
+            if case .ok(let ok) = try await membersCall {
+                members = try ok.body.json.members
             }
         } catch {
             guard !isTaskCancellation(error) else { return }  // D08

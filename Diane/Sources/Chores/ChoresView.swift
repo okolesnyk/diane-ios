@@ -384,10 +384,12 @@ struct ChoresView: View {
             Button("OK", role: .cancel) {}
         }
         // D24: dismiss never resurfaces, so it always confirms first.
-        .confirmationDialog(
+        // .alert, not confirmationDialog: iOS 26 anchors dialogs to their
+        // source with a pointer bubble — the owner wants a plain centered
+        // modal (2026-08-09, re-affirmed 2026-08-10).
+        .alert(
             ChoreBoard.dismissPrompt(pendingDismiss?.title ?? ""),
             isPresented: dismissShown,
-            titleVisibility: .visible,
             presenting: pendingDismiss
         ) { occurrence in
             Button("Dismiss", role: .destructive) {
