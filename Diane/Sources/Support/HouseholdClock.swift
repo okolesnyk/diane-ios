@@ -9,6 +9,12 @@ import Observation
 /// traveling phone must still see the family's day (review M9, same rule the
 /// web kiosk applies via useLocalToday). Screens read `today`/`minute` in
 /// their bodies (re-rendering each tick) and key refetches on `today`.
+///
+/// Verified cross-frame 2026-08-10 (device CDT, household Warsaw): the day,
+/// minute, now-line, and late math all render household wall time. If a
+/// SIMULATOR shows a skewed clock, suspect CoreSimulator's clock drift
+/// after host sleep (reboot the sim), not this class — and don't test with
+/// a UTC household: a zero offset can't reveal double application.
 @MainActor
 @Observable
 final class HouseholdClock {
