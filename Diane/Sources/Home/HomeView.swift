@@ -21,6 +21,12 @@ import UniformTypeIdentifiers
 /// as if it sat in the bottom menu. The tile of a module that IS in the
 /// bottom menu selects that tab instead of pushing a twin; re-tapping Home
 /// in the bottom menu returns pushed modules to this grid.
+///
+/// The pulse (owner 2026-08-10, rev 5): each live tile carries ONE count
+/// line — just numbers — plus a red corner dot when Chores holds something
+/// late. Counts follow the app-wide member filter (Rewards excepted); a
+/// tile with nothing to count is a quiet door, and a failed fetch keeps
+/// the last pulse — a launcher never wears error chrome.
 struct HomeView: View {
     let context: SignedInContext
     /// Owned by RootTabView so re-tapping the Home tab can pop to the grid.
@@ -31,8 +37,13 @@ struct HomeView: View {
 
     @Environment(HouseholdClock.self) private var clock
     @Environment(TabLayoutStore.self) private var layout
+    @Environment(MemberFilterStore.self) private var filter
+    @Environment(SyncSignals.self) private var signals
+    @Environment(AppState.self) private var appState
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     @State private var editing = false
+    @State private var snapshot = HomeLogic.Snapshot()
     /// The grid's system drag (hold-to-lift; it shares space with the
     /// scroll gesture). The bar uses its own INSTANT gesture below.
     @State private var dragging: TabItem?
@@ -42,11 +53,30 @@ struct HomeView: View {
     @State private var barDragOffset: CGFloat = 0
     @State private var barDragShift: CGFloat = 0
 
-    private let columns = [GridItem(.adaptive(minimum: 150), spacing: 14)]
+    /// One column at accessibility type sizes (the review's Dynamic Type
+    /// rule — tiles grow, the grid gives way, like Apple's Home app).
+    private var columns: [GridItem] {
+        typeSize.isAccessibilitySize
+            ? [GridItem(.flexible())]
+            : [GridItem(.adaptive(minimum: 150), spacing: 14)]
+    }
+
+    /// Refetch on any server change or day roll; minute and filter changes
+    /// only RECOMPUTE lines from the cached snapshot (no new timers).
+    private var pulseKey: String {
+        "\(signals.version(of: Set(DianeTopic.allCases)))|\(clock.today)"
+    }
 
     var body: some View {
         let enabled = NavigationLogic.enabledModules(clock.modules)
         let tiles = layout.orderedTiles(enabled: enabled)
+        let pulse = HomeLogic.pulse(
+            snapshot,
+            today: clock.today,
+            minute: clock.minute,
+            timeZone: clock.timeZone,
+            selected: filter.effective(all: snapshot.memberIds)
+        )
         NavigationStack(path: $path) {
             VStack(spacing: 0) {
                 DianeTopBar(
@@ -58,9 +88,9 @@ struct HomeView: View {
                     LazyVGrid(columns: columns, spacing: 14) {
                         ForEach(tiles) { module in
                             if editing {
-                                editingTile(module, enabled: enabled)
+                                editingTile(module, enabled: enabled, pulse: pulse)
                             } else {
-                                launchTile(module)
+                                launchTile(module, pulse: pulse)
                             }
                         }
                         ForEach(FutureModule.allCases) { future in
@@ -78,6 +108,7 @@ struct HomeView: View {
             .navigationDestination(for: DianeModule.self) { module in
                 ModuleScreen(module: module, context: context, open: { path.append($0) })
             }
+            .task(id: pulseKey) { await loadPulse() }
         }
     }
 
@@ -94,7 +125,7 @@ struct HomeView: View {
 
     // MARK: - Tiles
 
-    private func launchTile(_ module: DianeModule) -> some View {
+    private func launchTile(_ module: DianeModule, pulse: HomeLogic.Pulse) -> some View {
         Button {
             if barModules.contains(module) {
                 selectBarTab(module)
@@ -102,7 +133,12 @@ struct HomeView: View {
                 path.append(module)
             }
         } label: {
-            tile(title: module.title, systemImage: module.systemImage)
+            tile(
+                title: module.title,
+                systemImage: module.systemImage,
+                line: pulse.line(for: module),
+                dot: pulse.showsDot(for: module)
+            )
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -119,9 +155,11 @@ struct HomeView: View {
     /// Jiggling and draggable — the drag only ever REORDERS the grid; bar
     /// membership is the corner badge (owner 2026-08-10, the drag-in/out
     /// felt awkward).
-    private func editingTile(_ module: DianeModule, enabled: [DianeModule]) -> some View {
+    private func editingTile(_ module: DianeModule, enabled: [DianeModule], pulse: HomeLogic.Pulse) -> some View {
         let inBar = layout.barItems.contains(.module(module))
-        return tile(title: module.title, systemImage: module.systemImage)
+        // Edit mode: the badge owns the corner the icon sits in — content
+        // steps down and the late dot hides (the design review's fix).
+        return tile(title: module.title, systemImage: module.systemImage, line: pulse.line(for: module), editing: true)
             .overlay(alignment: .topLeading) {
                 Button {
                     withAnimation {
@@ -150,24 +188,114 @@ struct HomeView: View {
             })
     }
 
-    private func tile(title: String, systemImage: String, comingLater: Bool = false) -> some View {
-        VStack(spacing: 10) {
-            Image(systemName: systemImage)
-                .font(.system(size: 30))
-                .foregroundStyle(comingLater ? Color.secondary : Color.accentColor)
-            Text(title)
-                .font(.headline)
+    /// The decided tile (owner 2026-08-10, rev 5): small icon and name on a
+    /// header row, one count line pinned at the bottom, red dot top-right
+    /// when Chores holds something late. No hard height cap — Dynamic Type
+    /// grows the tile (the review's rule).
+    private func tile(
+        title: String,
+        systemImage: String,
+        line: HomeLogic.Line? = nil,
+        dot: Bool = false,
+        comingLater: Bool = false,
+        editing: Bool = false
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(comingLater ? Color.secondary : Color.accentColor)
+                Text(title)
+                    .font(.subheadline.weight(.bold))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
             if comingLater {
                 Text("Coming later")
-                    .font(.caption2)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            } else if let line {
+                lineText(line)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: 110)
+        .padding(12)
+        // Edit mode: the +/− badge takes the icon's corner — content steps
+        // down so they never collide.
+        .padding(.top, editing ? 10 : 0)
+        .frame(maxWidth: .infinity, minHeight: 100, alignment: .topLeading)
         .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(alignment: .topTrailing) {
+            if dot && !editing {
+                Circle().fill(.red).frame(width: 8, height: 8).padding(10)
+            }
+        }
         .opacity(comingLater ? 0.55 : 1)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(comingLater ? "\(title), coming later" : title)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText(title: title, line: line, comingLater: comingLater))
+    }
+
+    /// "3 open · 1 late" — the count carries primary weight, the late part
+    /// is red AND textual (never color alone), everything else recedes.
+    private func lineText(_ line: HomeLogic.Line) -> some View {
+        var text = Text(line.count).foregroundStyle(.primary).fontWeight(.semibold)
+        if let late = line.late {
+            text = text + Text(" · ").foregroundStyle(.secondary)
+                + Text(late).foregroundStyle(.red).fontWeight(.semibold)
+        }
+        return text
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+    }
+
+    /// One VoiceOver element per tile: "Chores, 3 open, 1 late." The dot
+    /// announces nothing on its own.
+    private func accessibilityText(title: String, line: HomeLogic.Line?, comingLater: Bool) -> String {
+        if comingLater { return "\(title), coming later" }
+        guard let line else { return title }
+        return "\(title), \(([line.count] + (line.late.map { [$0] } ?? [])).joined(separator: ", "))"
+    }
+
+    // MARK: - The pulse data
+
+    /// Every count comes from a fetch the app already performs elsewhere;
+    /// failures keep the last snapshot — quiet doors beat error chrome.
+    private func loadPulse() async {
+        let today = clock.today
+        do {
+            async let eventsCall = context.client.api.listEvents(
+                .init(query: .init(from: today, to: DayLogic.addDays(today, 1)))
+            )
+            async let choresCall = context.client.api.listChoreOccurrences(.init())
+            async let boardCall = context.client.api.getRoutineBoard(.init(query: .init(date: today)))
+            async let waitingCall = context.client.api.listRewardRedemptions(
+                .init(query: .init(status: .redeemed, limit: RewardsLogic.waitingLimit))
+            )
+            async let membersCall = context.client.api.listMembers(.init())
+
+            var next = HomeLogic.Snapshot()
+            switch try await membersCall {
+            case .ok(let ok): next.memberIds = try ok.body.json.members.map(\.id)
+            case .unauthorized: appState.handleUnauthorized(); return
+            default: return
+            }
+            if case .ok(let ok) = try await eventsCall {
+                next.events = try ok.body.json.events
+            }
+            if case .ok(let ok) = try await choresCall {
+                next.chores = try ok.body.json.occurrences
+            }
+            if case .ok(let ok) = try await boardCall {
+                next.board = try ok.body.json.entries
+            }
+            if case .ok(let ok) = try await waitingCall {
+                next.waiting = try ok.body.json.redemptions.count
+            }
+            snapshot = next
+        } catch {
+            // Cancelled or offline: the last snapshot stands.
+        }
     }
 
     // MARK: - The editable bar (the system bar's jiggling stand-in)
