@@ -6,7 +6,7 @@ import SwiftUI
 
 /// "Planning ahead" / "The record" — every non-today day opens with one.
 struct DayModeNote: View {
-    let phase: MyDayLogic.DayPhase
+    let phase: DayLogic.DayPhase
 
     var body: some View {
         // Past only: it explains why the circles are locked. The future's
@@ -54,7 +54,7 @@ struct CheckCircle: View {
     let inFlight: Bool
     var size: CGFloat = 26
     /// An unowned chore: dashed but LIVE — tap it to do it and keep the
-    /// stars. Colorless, exactly like Family Day's pool language.
+    /// stars. Colorless, exactly like the Today page's pool language.
     var pool = false
     let action: () -> Void
 

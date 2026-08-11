@@ -46,6 +46,15 @@ enum ChoreDetailLogic {
         return line
     }
 
+    /// "Jun 18, 2026" — the details sheet always carries the year (owner
+    /// 2026-08-10): a detail surface is where ambiguity goes to die.
+    static func fullDate(_ ymd: String) -> String {
+        let parts = ymd.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3, (1...12).contains(parts[1]) else { return ymd }
+        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        return "\(months[parts[1] - 1]) \(parts[2]), \(parts[0])"
+    }
+
     /// "Due today at 18:00" / "Due Aug 15" / "By Aug 15" / "Anytime" from the
     /// occurrence's dueDate + dueMode + dueTime against household today.
     static func scheduleLine(
@@ -57,11 +66,11 @@ enum ChoreDetailLogic {
         guard let dueDate else { return "Anytime" }
         var line: String
         if dueMode == .by {
-            line = "By \(EventDetailLogic.mediumDate(dueDate))"  // deadline, not a day plan
+            line = "By \(fullDate(dueDate))"  // deadline, not a day plan
         } else if dueDate == today {
             line = "Due today"
         } else {
-            line = "Due \(EventDetailLogic.mediumDate(dueDate))"
+            line = "Due \(fullDate(dueDate))"
         }
         if let dueTime { line += " at \(dueTime)" }
         return line

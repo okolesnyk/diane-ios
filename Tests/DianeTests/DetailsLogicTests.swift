@@ -350,14 +350,14 @@ import Testing
         @Test func scheduleFutureDate() {
             #expect(
                 ChoreDetailLogic.scheduleLine(dueDate: "2026-08-15", dueMode: .on, dueTime: nil, today: today)
-                    == "Due Aug 15"
+                    == "Due Aug 15, 2026"
             )
         }
 
         @Test func schedulePastDateKeepsTheDate() {
             #expect(
                 ChoreDetailLogic.scheduleLine(dueDate: "2026-07-20", dueMode: nil, dueTime: "18:00", today: today)
-                    == "Due Jul 20 at 18:00"
+                    == "Due Jul 20, 2026 at 18:00"
             )
         }
 
@@ -365,11 +365,11 @@ import Testing
         @Test func scheduleByDeadline() {
             #expect(
                 ChoreDetailLogic.scheduleLine(dueDate: "2026-08-15", dueMode: .by, dueTime: nil, today: today)
-                    == "By Aug 15"
+                    == "By Aug 15, 2026"
             )
             #expect(
                 ChoreDetailLogic.scheduleLine(dueDate: "2026-07-27", dueMode: .by, dueTime: "18:00", today: today)
-                    == "By Jul 27 at 18:00"
+                    == "By Jul 27, 2026 at 18:00"
             )
         }
     }

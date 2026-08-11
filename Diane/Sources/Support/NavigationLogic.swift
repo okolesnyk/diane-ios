@@ -76,17 +76,17 @@ enum NavigationLogic {
         DianeModule.allCases.filter { $0.isOn(modules) }
     }
 
-    /// "Tue, Aug 5" from a household-local YYYY-MM-DD (My Day's nav title).
-    /// Lives here, not on the View — View members inherit @MainActor and a
-    /// pure formatter must stay callable from anywhere (isolation trap).
-    static func myDayTitle(for today: String) -> String {
+    /// "Tue, Aug 5" from a household-local YYYY-MM-DD (the day pages' nav
+    /// title). Lives here, not on the View — View members inherit @MainActor
+    /// and a pure formatter must stay callable from anywhere (isolation trap).
+    static func dayTitle(for today: String) -> String {
         let parts = today.split(separator: "-").compactMap { Int(String($0)) }
-        guard parts.count == 3 else { return "My Day" }
+        guard parts.count == 3 else { return "Today" }
         var components = DateComponents()
         (components.year, components.month, components.day) = (parts[0], parts[1], parts[2])
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
-        guard let date = calendar.date(from: components) else { return "My Day" }
+        guard let date = calendar.date(from: components) else { return "Today" }
         let formatter = DateFormatter()
         formatter.timeZone = calendar.timeZone
         formatter.setLocalizedDateFormatFromTemplate("EEE MMM d")

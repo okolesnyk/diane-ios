@@ -6,7 +6,7 @@ import Foundation
 /// keys, due-origin captions, the future routine board, and the
 /// calendar-color rails. Nonisolated on purpose: Views inherit @MainActor,
 /// logic must not.
-enum MyDayLogic {
+enum DayLogic {
     typealias Event = Components.Schemas.EventOccurrence
     typealias Chore = Components.Schemas.ChoreOccurrence
     typealias CalendarInfo = Components.Schemas.Calendar
@@ -184,10 +184,10 @@ enum MyDayLogic {
             let end = event.endDate ?? addDays(start, 1)
             return start <= date && date < end
         }
-        guard let startsAt = event.startsAt, let instant = TodayLogic.parseInstant(startsAt) else {
+        guard let startsAt = event.startsAt, let instant = TimeLogic.parseInstant(startsAt) else {
             return false
         }
-        return TodayLogic.dateString(for: instant, timeZone: timeZone) == date
+        return TimeLogic.dateString(for: instant, timeZone: timeZone) == date
     }
 
     // MARK: - Late math (display twin of the server's rule)
@@ -201,8 +201,8 @@ enum MyDayLogic {
         guard chore.status == .open else { return false }
         if chore.late { return true }
         guard chore.dueDate == today,
-              let time = chore.dueTime, let due = TodayLogic.minutes(time),
-              let now = TodayLogic.minutes(minute)
+              let time = chore.dueTime, let due = TimeLogic.minutes(time),
+              let now = TimeLogic.minutes(minute)
         else { return false }
         return now >= due + lateGraceMinutes
     }
@@ -217,14 +217,14 @@ enum MyDayLogic {
         if chore.late { return true }
         guard let dueDate = chore.dueDate,
               let completedAt = chore.completedAt,
-              let instant = TodayLogic.parseInstant(completedAt)
+              let instant = TimeLogic.parseInstant(completedAt)
         else { return false }
-        let doneDay = TodayLogic.dateString(for: instant, timeZone: timeZone)
+        let doneDay = TimeLogic.dateString(for: instant, timeZone: timeZone)
         if dueDate < doneDay { return true }
         guard dueDate == doneDay,
-              let time = chore.dueTime, let due = TodayLogic.minutes(time)
+              let time = chore.dueTime, let due = TimeLogic.minutes(time)
         else { return false }
-        return TodayLogic.clockMinutes(of: instant, timeZone: timeZone) >= due + lateGraceMinutes
+        return TimeLogic.clockMinutes(of: instant, timeZone: timeZone) >= due + lateGraceMinutes
     }
 
     // MARK: - The merged timeline
@@ -245,11 +245,11 @@ enum MyDayLogic {
             switch self {
             case .event(let event):
                 if event.allDay { return -1 }
-                guard let startsAt = event.startsAt, let instant = TodayLogic.parseInstant(startsAt)
+                guard let startsAt = event.startsAt, let instant = TimeLogic.parseInstant(startsAt)
                 else { return Int.max }
-                return TodayLogic.clockMinutes(of: instant, timeZone: timeZone)
+                return TimeLogic.clockMinutes(of: instant, timeZone: timeZone)
             case .chore(let chore):
-                guard let time = chore.dueTime, let minutes = TodayLogic.minutes(time) else {
+                guard let time = chore.dueTime, let minutes = TimeLogic.minutes(time) else {
                     return Int.max
                 }
                 return minutes
@@ -258,16 +258,16 @@ enum MyDayLogic {
 
     }
 
-    /// "due yesterday 20:05" — the debt's origin on a Catch up row.
+    /// "Due Sun, Aug 10 16:00" — the debt's origin on a Catch up row; ONE
+    /// grammar for the Today page and the Chores module (owner 2026-08-10 —
+    /// the two Catch ups disagreed; real dates, no "yesterday").
     static func dueOrigin(_ chore: Chore, today: String) -> String? {
         guard let due = chore.dueDate else { return nil }
         var dayPart: String
-        if due == addDays(today, -1) {
-            dayPart = "due yesterday"
-        } else if due == today {
-            dayPart = "due today"
+        if due == today {
+            dayPart = "Due today"
         } else {
-            dayPart = "due \(NavigationLogic.myDayTitle(for: due))"
+            dayPart = "Due \(NavigationLogic.dayTitle(for: due))"
             // Another year's date says so (owner 2026-08-10) — "Aug 11"
             // alone could be next year's.
             if due.prefix(4) != today.prefix(4) { dayPart += ", \(due.prefix(4))" }
@@ -285,7 +285,7 @@ enum MyDayLogic {
         return calendar.color ?? calendar.providerColor
     }
 
-    // MARK: - Strip dots (blue events / orange chores; Family Day fills them)
+    // MARK: - Strip dots (blue events / orange chores; the Today page fills them)
 
     struct DayDots: Equatable {
         var hasEvents = false

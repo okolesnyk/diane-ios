@@ -1,1082 +1,801 @@
 import DianeKit
 import SwiftUI
 
-// MARK: - Pure logic (nonisolated, testable)
-
-/// Data shaping for the Today screen. Callers inject dates/time zones.
-enum TodayLogic {
-    typealias Event = Components.Schemas.EventOccurrence
-    typealias Chore = Components.Schemas.ChoreOccurrence
-    typealias RoutineEntry = Components.Schemas.RoutineBoardEntry
-
-    /// Local "YYYY-MM-DD" — the device's own calendar day, never via UTC.
-    static func dateString(for date: Date, timeZone: TimeZone) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
-        let c = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
-    }
-
-    /// The next local day — /events ranges are end-EXCLUSIVE [from, to), so
-    /// "today only" must query [today, tomorrow).
-    static func nextDayString(for date: Date, timeZone: TimeZone) -> String {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
-        let next = calendar.date(byAdding: .day, value: 1, to: date) ?? date
-        return dateString(for: next, timeZone: timeZone)
-    }
-
-    /// All-day events first (server order), then timed by startsAt (ISO UTC
-    /// strings compare lexicographically), summary as tiebreak.
-    static func sortedEvents(_ events: [Event]) -> [Event] {
-        let allDay = events.filter(\.allDay)
-        let timed = events.filter { !$0.allDay }.sorted {
-            ($0.startsAt ?? "", $0.summary) < ($1.startsAt ?? "", $1.summary)
-        }
-        return allDay + timed
-    }
-
-    /// ISO-8601 UTC instant → local "HH:mm". The api emits fractional
-    /// seconds ("...T22:00:00.000Z") which the default parser REJECTS —
-    /// try fractional first, then plain (caught live in M9).
-    static func parseInstant(_ isoInstant: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: isoInstant) ?? ISO8601DateFormatter().date(from: isoInstant)
-    }
-
-    static func timeLabel(_ isoInstant: String?, timeZone: TimeZone) -> String? {
-        guard let isoInstant, let date = parseInstant(isoInstant) else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
-    }
-
-    static func owner(of chore: Chore) -> String? {
-        chore.claimedByMemberId ?? chore.assigneeMemberId
-    }
-
-    struct ChoreSections: Equatable {
-        var mine: [Chore] = []
-        var pool: [Chore] = []
-        var completed: [Chore] = []
-        var isEmpty: Bool { mine.isEmpty && pool.isEmpty && completed.isEmpty }
-    }
-
-    /// Partition the actionable view: my open rows, the up-for-grabs pool,
-    /// and my completed-today rows (input order preserved per bucket).
-    /// D06: a completed row belongs to its OWNER; pool rows (no owner) belong
-    /// to their COMPLETER — completing a sibling's chore stays on their board.
-    static func choreSections(_ occurrences: [Chore], me: String) -> ChoreSections {
-        var sections = ChoreSections()
-        for occurrence in occurrences {
-            let owner = owner(of: occurrence)
-            if occurrence.status == .completed {
-                if (owner ?? occurrence.completedByMemberId) == me {
-                    sections.completed.append(occurrence)
-                }
-            } else if owner == me {
-                sections.mine.append(occurrence)
-            } else if owner == nil {
-                sections.pool.append(occurrence)
-            }
-        }
-        return sections
-    }
-
-    /// Kiosk trust: the circle completes an open row and un-checks a done
-    /// one — no matter who owns it or checked it.
-    enum CircleAction: Equatable {
-        case complete, uncomplete
-    }
-
-    static func circleAction(for chore: Chore) -> CircleAction {
-        chore.status == .completed ? .uncomplete : .complete
-    }
-
-    /// M9c: beyond the circle a row has exactly one other surface — swipe.
-    /// Mirrors the Chores board rules so both screens behave identically.
-    struct SwipeActions: Equatable {
-        var canClaim = false
-        var canPutBack = false
-        var canDismiss = false
-    }
-
-    /// Claim an unowned open row, put back any claimed one (D27), dismiss any
-    /// open one (D23). A completed row offers nothing — the circle un-checks it.
-    static func swipeActions(for chore: Chore) -> SwipeActions {
-        guard chore.status != .completed else { return SwipeActions() }
-        return SwipeActions(
-            canClaim: chore.assigneeMemberId == nil && chore.claimedByMemberId == nil,
-            canPutBack: chore.claimedByMemberId != nil,
-            canDismiss: true
-        )
-    }
-
-    /// D24: dismiss is permanent, so it names the chore and confirms first.
-    static func dismissPrompt(_ title: String) -> String {
-        "Dismiss \u{201C}\(title)\u{201D}?"
-    }
-
-    /// One family-hub block: another member's whole day.
-    struct MemberDay: Equatable {
-        var member: Components.Schemas.Member
-        var events: [Event] = []  // R6
-        var openChores: [Chore] = []
-        var doneCount: Int = 0
-        var routines: [RoutineEntry] = []
-        /// R6: events are plans too — a day with an appointment isn't free.
-        var isFree: Bool { events.isEmpty && openChores.isEmpty && doneCount == 0 && routines.isEmpty }
-    }
-
-    /// R6: a member's events are the ones whose memberIds CONTAINS their id.
-    /// Whole-family events (memberIds nil) belong to the shared Today section
-    /// only — never duplicated onto every member's block. Sorted like the
-    /// shared list: all-day first, then by start.
-    static func memberEvents(_ events: [Event], member: String) -> [Event] {
-        sortedEvents(events.filter { $0.memberIds?.contains(member) ?? false })
-    }
-
-    /// Hub blocks for every OTHER member, by sortOrder (name tiebreak).
-    /// Open rows go to their OWNER; done rows count per D06 (owner, else
-    /// completer); unowned pool rows stay off the blocks — they live in
-    /// "My day" as up-for-grabs. Routines are the member's WHOLE day in
-    /// board order — the window cut is only for MY actionable list.
-    static func familyDays(
-        members: [Components.Schemas.Member],
-        me: String,
-        occurrences: [Chore],
-        routines: [RoutineEntry],
-        events: [Event]
-    ) -> [MemberDay] {
-        members
-            .filter { $0.id != me }
-            .sorted { ($0.sortOrder, $0.name) < ($1.sortOrder, $1.name) }
-            .map { member in
-                var day = MemberDay(member: member)
-                for occurrence in occurrences {
-                    let owner = owner(of: occurrence)
-                    if occurrence.status == .completed {
-                        if (owner ?? occurrence.completedByMemberId) == member.id {
-                            day.doneCount += 1
-                        }
-                    } else if owner == member.id {
-                        day.openChores.append(occurrence)
-                    }
-                }
-                day.routines = routines.filter { $0.memberId == member.id }
-                day.events = memberEvents(events, member: member.id)  // R6
-                return day
-            }
-    }
-
-    /// D06: "by <name>" when someone other than the owner checked it off.
-    static func completedByNote(_ chore: Chore, names: [String: String]) -> String? {
-        guard chore.status == .completed, let by = chore.completedByMemberId,
-              let owner = owner(of: chore), by != owner else { return nil }
-        return names[by].map { "by \($0)" }
-    }
-
-    /// D07: deadline chip for dueMode 'by' rows — "by Aug 15" — so a
-    /// flexible-with-deadline chore never reads as due today. Pure string
-    /// math on the wire date; no tz conversion.
-    static func deadlineLabel(dueDate: String?, dueMode: Chore.DueModePayload?, locale: Locale = .current) -> String? {
-        guard dueMode == .by, let dueDate else { return nil }
-        let parts = dueDate.split(separator: "-")
-        guard parts.count == 3, let month = Int(parts[1]), let day = Int(parts[2]),
-              (1...12).contains(month) else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = locale
-        let symbols = formatter.shortMonthSymbols ?? []
-        guard symbols.indices.contains(month - 1) else { return nil }
-        return "by \(symbols[month - 1]) \(day)"
-    }
-
-    /// "HH:mm" → minutes since midnight.
-    static func minutes(_ hhmm: String) -> Int? {
-        let parts = hhmm.split(separator: ":")
-        guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]),
-              (0...23).contains(h), (0...59).contains(m) else { return nil }
-        return h * 60 + m
-    }
-
-    /// [start, end] — END-INCLUSIVE like the web kiosk (D26): evening presets
-    /// end 23:59 and the last minute must count. An end before start wraps
-    /// past midnight.
-    static func windowContains(clock: Int, start: String, end: String) -> Bool {
-        guard let s = minutes(start), let e = minutes(end) else { return false }
-        return s <= e ? (clock >= s && clock <= e) : (clock >= s || clock <= e)
-    }
-
-    static func clockMinutes(of date: Date, timeZone: TimeZone) -> Int {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
-        let c = calendar.dateComponents([.hour, .minute], from: date)
-        return (c.hour ?? 0) * 60 + (c.minute ?? 0)
-    }
-
-    /// R8: one of MY routines, flagged when the clock is inside its window.
-    struct DayRoutine: Equatable {
-        var entry: RoutineEntry
-        var isNow: Bool
-    }
-
-    /// R8: my WHOLE day — same as every other member's block, no window cut.
-    /// In-window entries come first and carry the "Now" pill; board order is
-    /// kept inside each group.
-    static func myRoutines(_ entries: [RoutineEntry], me: String, clock: Int) -> [DayRoutine] {
-        let mine = entries.filter { $0.memberId == me }.map {
-            DayRoutine(
-                entry: $0,
-                isNow: windowContains(clock: clock, start: $0.windowStart, end: $0.windowEnd)
-            )
-        }
-        return mine.filter(\.isNow) + mine.filter { !$0.isNow }
-    }
-
-    /// Resolved (completed or skipped) over total — matches the web kiosk.
-    static func progress(of entry: RoutineEntry) -> (done: Int, total: Int) {
-        (entry.tasks.filter { $0.status != .open }.count, entry.tasks.count)
-    }
-
-    /// "2 of 3" progress line; every task resolved reads "All done ✓".
-    static func routineProgressLabel(of entry: RoutineEntry) -> String {
-        let progress = progress(of: entry)
-        return progress.done == progress.total ? "All done ✓" : "\(progress.done) of \(progress.total)"
-    }
-
-    // R13: rows are real Buttons — one curated VoiceOver label each, so the
-    // trait and the announcement arrive together.
-    static func eventRowLabel(_ event: Event, timeZone: TimeZone) -> String {
-        let when = event.allDay ? "all day" : timeLabel(event.startsAt, timeZone: timeZone).map { "at \($0)" }
-        return when.map { "\(event.summary), \($0)" } ?? event.summary
-    }
-
-    static func choreRowLabel(_ chore: Chore, names: [String: String] = [:]) -> String {
-        var parts = [chore.title, "\(chore.starValue) stars"]
-        if chore.status == .completed {
-            parts.append("done")
-        } else if chore.late {
-            parts.append("late")
-        }
-        if let note = completedByNote(chore, names: names) { parts.append(note) }
-        return parts.joined(separator: ", ")
-    }
-
-    static func routineRowLabel(_ entry: RoutineEntry, isNow: Bool) -> String {
-        let progress = progress(of: entry)
-        var parts = [entry.title]
-        if isNow { parts.append("now") }
-        parts.append("\(progress.done) of \(progress.total) done")
-        return parts.joined(separator: ", ")
-    }
-
-    static func balance(of memberID: String, in balances: [Components.Schemas.StarBalance]) -> Int {
-        balances.first { $0.memberId == memberID }?.balance ?? 0
-    }
-
-    /// D21: the real emitted set (verified in diane-server apps/api/src);
-    /// chore_archived was never a server code.
-    static func conflictMessage(code: String?) -> String {
-        switch code {
-        case "already_claimed": "Someone already grabbed this one."
-        case "not_claimable": "That one can't be claimed."
-        case "not_actionable": "That chore can't be checked off right now."
-        case "already_completed": "That one is already done."
-        case "insufficient_stars": "Those stars are already spent."
-        default: "Couldn't complete that chore."
-        }
-    }
-
-    /// Action results carry the occurrence as an inline payload type.
-    static func occurrence(from payload: Components.Schemas.ChoreActionResult.OccurrencePayload) -> Chore {
-        .init(
-            id: payload.id,
-            choreId: payload.choreId,
-            title: payload.title,
-            emoji: payload.emoji,
-            notes: payload.notes,
-            starValue: payload.starValue,
-            upForGrabs: payload.upForGrabs,
-            dueDate: payload.dueDate,
-            dueMode: payload.dueMode.flatMap { Chore.DueModePayload(rawValue: $0.rawValue) },
-            dueTime: payload.dueTime,
-            status: Chore.StatusPayload(rawValue: payload.status.rawValue) ?? .completed,
-            late: payload.late,
-            assigneeMemberId: payload.assigneeMemberId,
-            claimedByMemberId: payload.claimedByMemberId,
-            completedByMemberId: payload.completedByMemberId,
-            completedAt: payload.completedAt
-        )
-    }
-}
-
-// MARK: - Screen
-
+/// The Today tab (owner 2026-08-10 — My Day is gone, this IS the day page):
+/// the family river under the member chips, everyone's routine cards pinned
+/// last. Chips tap to filter and double-tap to solo (owner 2026-08-07 — the
+/// mock's chip grammar); whole-family rows render once and ignore every
+/// filter; finished business greys out in place (owner 2026-08-07 — nothing
+/// folds away).
 struct TodayView: View {
-    struct TodayData {
-        var events: [Components.Schemas.EventOccurrence]
-        var occurrences: [Components.Schemas.ChoreOccurrence]
-        var routines: [Components.Schemas.RoutineBoardEntry]
-        var boardDate: String
-        var members: [Components.Schemas.Member]
-        var balances: [Components.Schemas.StarBalance]
-    }
-
-    /// One state drives every sheet: detail taps and settings.
-    /// R3: the routine payload FREEZES the board date it was opened with —
-    /// a live `boardDate` would go un-stale at household midnight and re-arm
-    /// actions against yesterday's snapshot (RoutinesView freezes it too).
-    enum ActiveSheet: Identifiable {
-        case event(Components.Schemas.EventOccurrence)
-        case chore(Components.Schemas.ChoreOccurrence)
-        case routine(entry: Components.Schemas.RoutineBoardEntry, boardDate: String)
-        case settings
-
-        /// Stable per row so a data refresh never re-presents the sheet.
-        var id: String {
-            switch self {
-            case .event(let occurrence): "event-\(occurrence.id)"
-            case .chore(let occurrence): "chore-\(occurrence.id)"
-            case .routine(let entry, _): "routine-\(entry.routineId)-\(entry.memberId)"
-            case .settings: "settings"
-            }
-        }
-    }
-
     let context: SignedInContext
     @Environment(AppState.self) private var appState
     @Environment(SyncSignals.self) private var signals
     @Environment(HouseholdClock.self) private var clock
-    @State private var data: Loadable<TodayData> = .loading
-    @State private var completingIDs: Set<String> = []
-    @State private var actionError: String?
+
+    @State private var selectedDate: String?
+    @State private var path = NavigationPath()
+    @State private var data: Loadable<DayData> = .loading
+    @Environment(MemberFilterStore.self) private var filter
     @State private var activeSheet: ActiveSheet?
-    @State private var pendingDismiss: Components.Schemas.ChoreOccurrence?  // D24
+    @State private var openRoutines: Set<String> = []
+    @State private var confirmDismiss: DayLogic.Chore?
+    @State private var confirmUncheck: ChoresPageLogic.Row?
+    @State private var actionError: String?
+    @State private var inFlight: Set<String> = []
+    /// Member tint — the device-local display pref (owner rule 2026-08-05).
+    @AppStorage("memberTint") private var tintOn = true
+    @Environment(\.colorScheme) private var colorScheme
+
+    private let rowInsets = EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+
+    struct DayData: Equatable {
+        var events: [DayLogic.Event]
+        var windowChores: [DayLogic.Chore]
+        var actionableChores: [DayLogic.Chore]
+        var board: [Components.Schemas.RoutineBoardEntry]
+        var members: [Components.Schemas.Member]
+        var calendars: [DayLogic.CalendarInfo]
+    }
+
+    enum ActiveSheet: Identifiable {
+        case newEvent(defaultDate: String)
+        case newChore
+
+        var id: String {
+            switch self {
+            case .newEvent(let date): "ev-\(date)"
+            case .newChore: "ch"
+            }
+        }
+    }
+
+    private var day: String { selectedDate ?? clock.today }
+    private var phase: DayLogic.DayPhase { DayLogic.phase(of: day, today: clock.today) }
+    private var members: [Components.Schemas.Member] { data.value?.members ?? [] }
+    private var allIDs: [String] { members.map(\.id) }
+    private var effectiveSelected: Set<String> { filter.effective(all: allIDs) }
+    private var isFiltered: Bool { filter.isFiltered && filter.selected.count < allIDs.count }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                switch data {
-                case .loading:
-                    ProgressView()
-                case .failed(let message):
-                    ContentUnavailableView {
-                        Label("Can't reach home", systemImage: "wifi.slash")
-                    } description: {
-                        Text(message)
-                    } actions: {
-                        Button("Try again") { Task { await load() } }
-                    }
-                case .loaded(let today):
-                    content(today)
-                }
+        NavigationStack(path: $path) {
+            VStack(spacing: 0) {
+                // Mock order (owner-confirmed): top bar → week strip →
+                // member chips → the river.
+                DianeTopBar(
+                    context: context,
+                    title: NavigationLogic.dayTitle(for: day),
+                    action: phase == .today ? nil : { selectedDate = nil },
+                    showToday: phase != .today,
+                    onToday: { selectedDate = nil }
+                )
+                strip
+                chips
+                content
             }
-            .navigationTitle("Today")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        activeSheet = .settings
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .accessibilityLabel("Settings")
-                }
+            .dianeRootChrome()
+            .task(id: "\(signals.version(of: [.chores, .events, .calendars, .members, .settings]))|\(day)") {
+                await load()
             }
+            .dianeDetailDestinations(
+                context: context,
+                members: members,
+                onChanged: { Task { await load() } }
+            )
+            // The filter is app-wide now (owner 2026-08-06) — it follows
+            // you to Calendar instead of resetting when you leave the tab.
             .sheet(item: $activeSheet) { sheet in
-                sheetContent(sheet)
-            }
-        }
-        // D05: clock.today in the key refetches at household midnight.
-        .task(id: "\(signals.version(of: [.events, .calendars, .chores, .routines, .stars, .members]))|\(clock.today)") {
-            await load()
-        }
-        .alert("Chores", isPresented: Binding(
-            get: { actionError != nil },
-            set: { if !$0 { actionError = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(actionError ?? "")
-        }
-        // D24: dismiss never resurfaces, so it always confirms first.
-        .confirmationDialog(
-            TodayLogic.dismissPrompt(pendingDismiss?.title ?? ""),
-            isPresented: Binding(
-                get: { pendingDismiss != nil },
-                set: { if !$0 { pendingDismiss = nil } }
-            ),
-            titleVisibility: .visible,
-            presenting: pendingDismiss
-        ) { chore in
-            Button("Dismiss", role: .destructive) {
-                Task { await perform(.dismiss, on: chore) }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            Text("It goes away for good — no stars, and it won't come back.")
-        }
-    }
-
-    /// Detail sheets refetch on any mutation (SSE bumps too).
-    @ViewBuilder
-    private func sheetContent(_ sheet: ActiveSheet) -> some View {
-        switch sheet {
-        case .event(let occurrence):
-            EventDetailView(
-                context: context,
-                occurrence: occurrence,
-                members: data.value?.members ?? []
-            ) {
-                Task { await load() }
-            }
-        case .chore(let occurrence):
-            ChoreDetailView(
-                context: context,
-                occurrence: occurrence,
-                members: data.value?.members ?? []
-            ) {
-                Task { await load() }
-            }
-        case .routine(let entry, let boardDate):  // R3: frozen at tap time
-            RoutineDetailView(
-                context: context,
-                entry: entry,
-                boardDate: boardDate,
-                members: data.value?.members ?? []
-            ) {
-                Task { await load() }
-            }
-        case .settings:
-            SettingsView(context: context)
-        }
-    }
-
-    // MARK: Content
-
-    private func content(_ today: TodayData) -> some View {
-        let me = context.session.memberID
-        let names = Dictionary(uniqueKeysWithValues: today.members.map { ($0.id, $0.name) })
-        let colors = Dictionary(uniqueKeysWithValues: today.members.map { ($0.id, $0.color) })
-        let events = TodayLogic.sortedEvents(today.events)
-        let chores = TodayLogic.choreSections(today.occurrences, me: me)
-        // D03/D05: household wall clock; reading clock.minute re-renders each
-        // tick, so a window opening appears within a minute on an idle screen.
-        // R8: my whole day, in-window entries first with a "Now" pill.
-        let routines = TodayLogic.myRoutines(
-            today.routines,
-            me: me,
-            clock: TodayLogic.minutes(clock.minute) ?? 0
-        )
-        let family = TodayLogic.familyDays(
-            members: today.members,
-            me: me,
-            occurrences: today.occurrences,
-            routines: today.routines,
-            events: today.events  // R6
-        )
-        return List {
-            headerSection(balance: TodayLogic.balance(of: me, in: today.balances))
-            if events.isEmpty && chores.isEmpty && routines.isEmpty {
-                Section {
-                    ContentUnavailableView(
-                        "Nothing on your plate today 🎉",
-                        systemImage: "sun.max",
-                        description: Text("Enjoy your free time!")
+                switch sheet {
+                case .newEvent(let date):
+                    EventFormView(
+                        context: context,
+                        members: members,
+                        mode: .create(defaultDate: date),
+                        onSaved: { Task { await load() } }
                     )
-                    .listRowInsets(rowInsets)
-                    .listRowSeparator(.hidden)
+                case .newChore:
+                    // A future day's new chore is due THAT day (owner
+                    // 2026-08-10); today keeps the anytime default.
+                    ChoreFormView(
+                        context: context,
+                        members: members,
+                        mode: .create,
+                        defaultDate: day == clock.today ? nil : day,
+                        onSaved: { Task { await load() } }
+                    )
                 }
             }
-            if !events.isEmpty {
-                Section {
-                    ForEach(events, id: \.id) { event in
-                        eventRow(event, colors: colors)
-                    }
-                } header: {
-                    sectionHeader("Today")
+            .alert(
+                TimeLogic.dismissPrompt(confirmDismiss?.title ?? ""),
+                isPresented: Binding(get: { confirmDismiss != nil }, set: { if !$0 { confirmDismiss = nil } })
+            ) {
+                Button("Dismiss", role: .destructive) {
+                    if let chore = confirmDismiss { Task { await act("dismiss", on: chore) } }
+                    confirmDismiss = nil
+                }
+            } message: {
+                Text("No stars for it — and you can bring it back from History.")
+            }
+            .alert(
+                uncheckPrompt,
+                isPresented: Binding(get: { confirmUncheck != nil }, set: { if !$0 { confirmUncheck = nil } })
+            ) {
+                Button("Undo the check", role: .destructive) {
+                    if let row = confirmUncheck { Task { await act("uncomplete", on: row.lead) } }
+                    confirmUncheck = nil
                 }
             }
-            if !chores.isEmpty || !routines.isEmpty {
-                Section {
-                    ForEach(chores.mine, id: \.id) { choreRow($0, pool: false, names: names) }
-                    ForEach(chores.pool, id: \.id) { choreRow($0, pool: true, names: names) }
-                    ForEach(chores.completed, id: \.id) { choreRow($0, pool: false, names: names) }
-                    ForEach(routines, id: \.entry.routineId) { routineRow($0, boardDate: today.boardDate) }
-                } header: {
-                    sectionHeader("My day")
-                }
-            }
-            // The family hub: everyone else's whole day, at a glance.
-            ForEach(Array(family.enumerated()), id: \.element.member.id) { index, day in
-                familySection(day, first: index == 0, balances: today.balances, boardDate: today.boardDate)
+            .alert("That didn't work", isPresented: Binding(get: { actionError != nil }, set: { if !$0 { actionError = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(actionError ?? "")
             }
         }
-        .listStyle(.plain)  // M9c: edge-to-edge, square, hairline-grouped
+    }
+
+    private func open(_ route: DetailRoute) { path.append(route) }
+
+    /// Cross-member un-checks confirm and name the cost (owner-approved) —
+    /// the Chores module's copy, so a shared row names everyone credited.
+    private var uncheckPrompt: String {
+        guard let row = confirmUncheck else { return "" }
+        return ChoresPageLogic.undoPrompt(row, names: memberNames)
+            + " " + ChoresPageLogic.undoDetail(row, names: memberNames)
+    }
+
+    // MARK: - Chips
+
+    private var chips: some View {
+        HStack(spacing: 14) {
+            ForEach(members, id: \.id) { member in
+                let chip = TodayLogic.chip(for: member.id, chores: dayChores, board: data.value?.board ?? [])
+                let isOn = effectiveSelected.contains(member.id)
+                VStack(spacing: 3) {
+                    ZStack {
+                        Circle()
+                            .stroke(Color.secondary.opacity(0.2), lineWidth: 3)
+                        Circle()
+                            .trim(from: 0, to: chip.progress)
+                            .stroke(
+                                Color(hex: member.color),
+                                style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                            )
+                            .rotationEffect(.degrees(-90))
+                        MemberAvatarView(
+                            name: member.name,
+                            colorHex: member.color,
+                            avatar: member.avatar,
+                            size: 38
+                        )
+                        if chip.hasLate {
+                            Circle()
+                                .fill(.red)
+                                .frame(width: 8, height: 8)
+                                .offset(x: 16, y: -16)
+                        }
+                    }
+                    .frame(width: 46, height: 46)
+                    Text(member.name)
+                        .font(.caption2)
+                        .lineLimit(1)
+                }
+                .opacity(isOn ? 1 : 0.35)
+                .onTapGesture(count: 2) {
+                    // Double-tap OR long-press solos — both on trial (owner
+                    // 2026-08-08, "so I can check what I use more"); a
+                    // second solo restores everyone.
+                    filter.solo(member.id)
+                }
+                .onTapGesture { filter.toggle(member.id, all: allIDs) }
+                .onLongPressGesture { filter.solo(member.id) }
+                .accessibilityLabel("\(member.name), \(Int(chip.progress * 100)) percent done\(chip.hasLate ? ", has late chores" : "")")
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Strip (the shared day cells, family-wide dots)
+
+    private var strip: some View {
+        DayStrip(day: day, today: clock.today) { date in
+            TodayLogic.familyDots(
+                for: date,
+                events: data.value?.events ?? [],
+                chores: data.value?.windowChores ?? [],
+                timeZone: clock.timeZone
+            )
+        } onSelect: { date in
+            selectedDate = date == clock.today ? nil : date
+        }
+    }
+
+    // MARK: - Content
+
+    private var dayChores: [DayLogic.Chore] {
+        guard let loaded = data.value else { return [] }
+        return phase == .today
+            ? loaded.actionableChores
+            : loaded.windowChores.filter { $0.dueDate == day }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch data {
+        case .loading:
+            Spacer(); ProgressView(); Spacer()
+        case .failed(let message):
+            Spacer()
+            ContentUnavailableView {
+                Label("Couldn't load the family", systemImage: "wifi.slash")
+            } description: { Text(message) } actions: {
+                Button("Try again") { Task { await load() } }
+            }
+            Spacer()
+        case .loaded(let loaded):
+            riverList(loaded)
+        }
+    }
+
+    private func riverList(_ loaded: DayData) -> some View {
+        let dayEvents = loaded.events.filter { DayLogic.onDay($0, date: day, timeZone: clock.timeZone) }
+        let river = TodayLogic.river(
+            events: dayEvents,
+            chores: dayChores,
+            selected: effectiveSelected,
+            phase: phase,
+            minute: clock.minute,
+            timeZone: clock.timeZone,
+            today: clock.today,
+            day: day
+        )
+        let nowIndex = phase == .today
+            ? TodayLogic.nowIndex(items: river.flowing, minute: clock.minute, timeZone: clock.timeZone)
+            : nil
+        // Everyone's routine cards, member-filtered like every owned row.
+        let routines = loaded.board.filter { effectiveSelected.contains($0.memberId) }
+
+        let isEmpty = river.catchUp.isEmpty && river.flowing.isEmpty
+            && river.dueToday.isEmpty && river.anytime.isEmpty && routines.isEmpty
+
+        return List {
+            DayModeNote(phase: phase)
+            if isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "sun.max").font(.title2).foregroundStyle(.secondary)
+                    Text("Nothing planned for anyone.").font(.subheadline).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 120)
+                .listRowSeparator(.hidden)
+            }
+            if !river.catchUp.isEmpty {
+                Section {
+                    // Washed like every owned row (owner 2026-08-08 — the
+                    // "Catch up stays neutral" rule made the pages disagree).
+                    ForEach(river.catchUp, id: \.id) { row in choreRow(row, loaded: loaded, late: true) }
+                } header: { header("Catch up").foregroundStyle(.red) }
+            }
+            // ONE bold "Today's Timeline" section (owner 2026-08-10): the
+            // timed day in order — nothing folds away (owner 2026-08-07),
+            // finished things grey in place — then, each band behind a
+            // dashed hint, the clockless dated rows and the anytimers. Pool
+            // rows sit at the bottom of whichever band their date and time
+            // chose; the standalone Up for grabs shelf is gone.
+            if !river.flowing.isEmpty || !river.dueToday.isEmpty || !river.anytime.isEmpty {
+                Section {
+                    ForEach(Array(river.flowing.enumerated()), id: \.element.id) { index, item in
+                        if index == nowIndex { NowLineRow(minute: clock.minute) }
+                        riverRow(item, loaded: loaded)
+                    }
+                    if !river.flowing.isEmpty, nowIndex == river.flowing.count { NowLineRow(minute: clock.minute) }
+                    if !river.flowing.isEmpty && !river.dueToday.isEmpty { AnytimeHintRow() }
+                    // The middle band wears the day's date (owner
+                    // 2026-08-10) — a tiny extra cue against the anytimers.
+                    ForEach(river.dueToday, id: \.id) { row in choreRow(row, loaded: loaded, late: row.late && !row.completed, dayCaption: true) }
+                    if !river.anytime.isEmpty && (!river.flowing.isEmpty || !river.dueToday.isEmpty) { AnytimeHintRow() }
+                    ForEach(river.anytime, id: \.id) { row in choreRow(row, loaded: loaded, late: false) }
+                } header: {
+                    // Other days keep the role template, date appended
+                    // (owner 2026-08-10): "Today's Timeline - Wed, Aug 12".
+                    header(day == clock.today ? "Today's Timeline"
+                        : "Today's Timeline - " + NavigationLogic.dayTitle(for: day), bold: true)
+                }
+            }
+            // Routines ride where Tomorrow and the 30-day shelf were (owner
+            // 2026-08-10) — My Day's cards, washed in each member's color.
+            if !routines.isEmpty {
+                Section {
+                    ForEach(routines, id: \.self) { entry in routineRows(entry) }
+                } header: { header("Routines") }
+            }
+            if phase != .past {
+                Section {
+                    if context.session.isAdmin {
+                        Menu {
+                            Button { activeSheet = .newEvent(defaultDate: day) } label: {
+                                Label("New event", systemImage: "calendar")
+                            }
+                            Button { activeSheet = .newChore } label: {
+                                Label("New chore", systemImage: "checkmark.circle")
+                            }
+                        } label: { GhostLabel(title: "New") }
+                            .buttonStyle(.plain)
+                            .listRowInsets(rowInsets)
+                            .listRowSeparator(.hidden)
+                    } else {
+                        Button { activeSheet = .newEvent(defaultDate: day) } label: { GhostLabel(title: "New") }
+                            .buttonStyle(.plain)
+                            .listRowInsets(rowInsets)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .contentMargins(.top, 0, for: .scrollContent)
         .fontDesign(.rounded)
         .refreshable { await load() }
+        // The hairline row must hug the seam: List reserves ~44pt per row
+        // and pads between sections, which left "now" floating in a band.
+        .environment(\.defaultMinListRowHeight, 1)
+        .listSectionSpacing(10)
+        // No page-level day swipe (owner 2026-08-06): rows own the
+        // horizontal gesture. The strip above travels days.
     }
 
-    /// M9c: every row sits flush at 16pt, no card, no page inset.
-    private var rowInsets: EdgeInsets {
-        EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
-    }
-
-    /// M9c: small uppercase secondary label, flush with the rows.
-    private func sectionHeader(_ title: String) -> some View {
+    /// Bold = the Today anchor (owner 2026-08-10) — heavier and primary so
+    /// it reads apart from Tomorrow and the rest.
+    private func header(_ title: String, bold: Bool = false) -> some View {
         Text(title)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .font(.caption.weight(bold ? .bold : .semibold))
             .textCase(.uppercase)
-            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))
-    }
-
-    private func headerSection(balance: Int) -> some View {
-        Section {
-            HStack(spacing: 14) {
-                MemberAvatarView(
-                    name: context.session.memberName,
-                    colorHex: context.session.memberColor,
-                    avatar: nil,
-                    size: 52
-                )
-                Text("Hi, \(context.session.memberName)!")
-                    .font(.title2.weight(.semibold))
-                Spacer()
-                starChip(balance, font: .headline)
-            }
-            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-            .listRowSeparator(.hidden)
-        }
-    }
-
-    private func starChip(_ balance: Int, font: Font) -> some View {
-        Text("★ \(balance)")
-            .font(font.weight(.semibold))
-            .foregroundStyle(.orange)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(Capsule().fill(.orange.opacity(0.15)))
-            .accessibilityLabel("\(balance) stars")
-    }
-
-    // R13: a real Button, so VoiceOver announces the row as actionable.
-    private func eventRow(_ event: Components.Schemas.EventOccurrence, colors: [String: String]) -> some View {
-        Button {
-            activeSheet = .event(event)
-        } label: {
-            HStack(spacing: 12) {
-                // D02: event instants render in the household frame, like the kiosk.
-                Text(event.allDay ? "All day" : (TodayLogic.timeLabel(event.startsAt, timeZone: clock.timeZone) ?? "—"))
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 58, alignment: .leading)
-                Text(event.summary)
-                    .lineLimit(2)
-                Spacer()
-                if let memberIds = event.memberIds {
-                    HStack(spacing: -3) {
-                        ForEach(memberIds, id: \.self) { id in
-                            Circle()
-                                .fill(Color(hex: colors[id] ?? "#8E8E93"))
-                                .frame(width: 10, height: 10)
-                        }
-                    }
-                } else {
-                    // Whole-family event.
-                    Image(systemName: "house.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(TodayLogic.eventRowLabel(event, timeZone: clock.timeZone))
-        .listRowInsets(rowInsets)
-    }
-
-    /// M9c: the two action surfaces, identical to the Chores tab — the circle
-    /// on the row, and swipe. Trailing dismisses (orange, never full-swipe,
-    /// always confirmed); leading claims or puts back.
-    private func choreSwipes<Content: View>(
-        _ chore: Components.Schemas.ChoreOccurrence,
-        @ViewBuilder row: () -> Content
-    ) -> some View {
-        let actions = TodayLogic.swipeActions(for: chore)
-        return row()
-            .listRowInsets(rowInsets)
-            .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                if actions.canClaim {
-                    Button { Task { await perform(.claim, on: chore) } } label: {
-                        Label("Claim", systemImage: "hand.raised")
-                    }
-                    .tint(.blue)
-                    .accessibilityLabel("Claim \(chore.title)")
-                }
-                if actions.canPutBack {
-                    // D27: the visible undo of Claim.
-                    Button { Task { await perform(.unclaim, on: chore) } } label: {
-                        Label("Put back", systemImage: "arrow.uturn.backward")
-                    }
-                    .tint(.blue)
-                    .accessibilityLabel("Put back \(chore.title)")
-                }
-            }
-            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                if actions.canDismiss {
-                    Button { pendingDismiss = chore } label: {  // D24: confirms first
-                        Label("Dismiss", systemImage: "xmark.circle")
-                    }
-                    .tint(.orange)
-                    .accessibilityLabel("Dismiss \(chore.title)")
-                }
-            }
-    }
-
-    // R13: the detail tap is a Button beside the circle — never wrapping it,
-    // so the circle keeps its own tap.
-    private func choreRow(_ chore: Components.Schemas.ChoreOccurrence, pool: Bool, names: [String: String]) -> some View {
-        let completed = chore.status == .completed
-        return choreSwipes(chore) {
-            HStack(spacing: 12) {
-                Button {
-                    activeSheet = .chore(chore)
-                } label: {
-                    HStack(spacing: 12) {
-                        emojiBadge(chore.emoji)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(chore.title)
-                                .strikethrough(completed)
-                                .foregroundStyle(completed ? .secondary : .primary)
-                            HStack(spacing: 6) {
-                                Text("★ \(chore.starValue)")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.orange)
-                                if pool {
-                                    tag("Up for grabs", color: .blue)
-                                }
-                                if chore.late && !completed {
-                                    tag("late", color: .red)
-                                }
-                                // D07: deadline chores must not read as due today.
-                                if let deadline = TodayLogic.deadlineLabel(dueDate: chore.dueDate, dueMode: chore.dueMode),
-                                   !completed {
-                                    tag(deadline, color: .purple)
-                                }
-                                // D06: someone else checked off my chore.
-                                if let note = TodayLogic.completedByNote(chore, names: names) {
-                                    Text(note)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        Spacer()
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(TodayLogic.choreRowLabel(chore, names: names))
-                completeCircle(chore)
-            }
-        }
-    }
-
-    /// R8: my own routine row — the "Now" pill marks an open window; the rest
-    /// of my day stays visible instead of being filtered out.
-    private func routineRow(_ day: TodayLogic.DayRoutine, boardDate: String) -> some View {
-        let entry = day.entry
-        return Button {
-            activeSheet = .routine(entry: entry, boardDate: boardDate)  // R3
-        } label: {
-            HStack(spacing: 12) {
-                emojiBadge(entry.emoji)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(entry.title)
-                        if day.isNow {
-                            tag("Now", color: .green)
-                        }
-                    }
-                    Text(TodayLogic.routineProgressLabel(of: entry))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .foregroundStyle(day.isNow ? .primary : .secondary)
-                Spacer()
-                if entry.streak >= 2 {
-                    Text("🔥 \(entry.streak)")
-                        .font(.subheadline)
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(TodayLogic.routineRowLabel(entry, isNow: day.isNow))
-        // M9c: display-only here — the tap opens the detail sheet, where the
-        // task circles and their swipes live.
-        .listRowInsets(rowInsets)
-    }
-
-    // MARK: Family hub
-
-    private func familySection(
-        _ day: TodayLogic.MemberDay,
-        first: Bool,
-        balances: [Components.Schemas.StarBalance],
-        boardDate: String
-    ) -> some View {
-        Section {
-            // R6: their appointments — the owner's "what are my wife's plans".
-            ForEach(day.events, id: \.id) { familyEventRow($0) }
-            ForEach(day.openChores, id: \.id) { familyChoreRow($0) }
-            if day.doneCount > 0 {
-                Text("\(day.doneCount) done ✓")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .listRowInsets(rowInsets)
-            }
-            ForEach(day.routines, id: \.routineId) { familyRoutineRow($0, boardDate: boardDate) }
-            if day.isFree {
-                Text("Free day ✨")
-                    .foregroundStyle(.secondary)
-                    .listRowInsets(rowInsets)
-            }
-        } header: {
-            // M9c: no card — the header IS the member's identity, rows sit flush.
-            VStack(alignment: .leading, spacing: 8) {
-                if first {
-                    Text("The family")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(.uppercase)
-                }
-                HStack(spacing: 10) {
-                    MemberAvatarView(
-                        name: day.member.name,
-                        colorHex: day.member.color,
-                        avatar: day.member.avatar,
-                        size: 30
-                    )
-                    Text(day.member.name)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    starChip(TodayLogic.balance(of: day.member.id, in: balances), font: .caption)
-                }
-                .textCase(nil)
-            }
-            .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 6, trailing: 16))
-        }
-    }
-
-    /// R6: one of their events. Whole-family events aren't here — they stay in
-    /// the shared "Today" section, unduplicated.
-    private func familyEventRow(_ event: Components.Schemas.EventOccurrence) -> some View {
-        Button {
-            activeSheet = .event(event)
-        } label: {
-            HStack(spacing: 12) {
-                // D02: household frame, like the shared list.
-                Text(event.allDay ? "All day" : (TodayLogic.timeLabel(event.startsAt, timeZone: clock.timeZone) ?? "—"))
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 58, alignment: .leading)
-                Text(event.summary)
-                    .lineLimit(2)
-                Spacer()
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(TodayLogic.eventRowLabel(event, timeZone: clock.timeZone))  // R13
-        .listRowInsets(rowInsets)
-    }
-
-    /// Compact open row on another member's block; the circle still checks
-    /// it off (kiosk trust — helping is the point) and swipe still acts.
-    private func familyChoreRow(_ chore: Components.Schemas.ChoreOccurrence) -> some View {
-        choreSwipes(chore) {
-            HStack(spacing: 12) {
-                // R13: Button beside the circle, so both stay tappable.
-                Button {
-                    activeSheet = .chore(chore)
-                } label: {
-                    HStack(spacing: 12) {
-                        emojiBadge(chore.emoji)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(chore.title)
-                            HStack(spacing: 6) {
-                                if let time = chore.dueTime {
-                                    tag(time, color: .secondary)
-                                }
-                                if chore.late {
-                                    tag("late", color: .red)
-                                }
-                                // D07: deadline chores must not read as due today.
-                                if let deadline = TodayLogic.deadlineLabel(dueDate: chore.dueDate, dueMode: chore.dueMode) {
-                                    tag(deadline, color: .purple)
-                                }
-                            }
-                        }
-                        Spacer()
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(TodayLogic.choreRowLabel(chore))
-                completeCircle(chore)
-            }
-        }
-    }
-
-    /// "🌅 Morning · 2 of 3" — the whole day's routines, not just open windows.
-    private func familyRoutineRow(_ entry: Components.Schemas.RoutineBoardEntry, boardDate: String) -> some View {
-        Button {
-            activeSheet = .routine(entry: entry, boardDate: boardDate)  // R3
-        } label: {
-            HStack(spacing: 12) {
-                emojiBadge(entry.emoji)
-                Text(entry.title)
-                Text("· \(TodayLogic.routineProgressLabel(of: entry))")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if entry.streak >= 2 {
-                    Text("🔥 \(entry.streak)")
-                        .font(.subheadline)
-                }
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(TodayLogic.routineRowLabel(entry, isNow: false))  // R13
-        .listRowInsets(rowInsets)
-    }
-
-    /// The 44pt circle: completes an open row, un-checks a done one.
-    private func completeCircle(_ chore: Components.Schemas.ChoreOccurrence) -> some View {
-        let completed = chore.status == .completed
-        return Button {
-            Task { await toggle(chore) }
-        } label: {
-            Group {
-                if completingIDs.contains(chore.id) {
-                    ProgressView()
-                } else {
-                    Image(systemName: completed ? "checkmark.circle.fill" : "circle")
-                        .font(.title2)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(completed ? Color.green : Color.secondary)
-                }
-            }
-            .frame(width: 44, height: 44)  // HIG minimum tap target
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.borderless)
-        .disabled(completingIDs.contains(chore.id))
-        .accessibilityLabel(completed ? "Uncomplete \(chore.title)" : "Complete \(chore.title)")
+            .foregroundStyle(bold ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
     }
 
     @ViewBuilder
-    private func emojiBadge(_ emoji: String?) -> some View {
-        Group {
-            if let emoji, !emoji.isEmpty {
-                Text(emoji).font(.title2)
-            } else {
-                Image(systemName: "sparkles")
-                    .font(.title3)
+    private func riverRow(_ item: TodayLogic.RiverItem, loaded: DayData) -> some View {
+        switch item {
+        case .event(let event): eventRow(event, loaded: loaded)
+        case .chores(let row): choreRow(row, loaded: loaded, late: false)
+        }
+    }
+
+    private func eventRow(_ event: DayLogic.Event, loaded: DayData) -> some View {
+        let owners = TodayLogic.owners(of: event)
+        // Fully-ended events grey in place, they never hide (owner
+        // 2026-08-07). A past day has ended wholesale.
+        let ended = phase == .past || (phase == .today && TodayLogic.hasEnded(
+            event,
+            minute: TimeLogic.minutes(clock.minute) ?? 0,
+            day: day,
+            timeZone: clock.timeZone
+        ))
+        return HStack(spacing: 10) {
+            timeCol(event.allDay ? "all day" : event.startsAt.flatMap { TimeLogic.timeLabel($0, timeZone: clock.timeZone) } ?? "")
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color(hex: DayLogic.railColorHex(for: event, calendars: loaded.calendars) ?? "#34c759"))
+                .frame(width: 4)
+                .frame(minHeight: 30)
+            DetailRow(route: .event(event), open: open) {
+                HStack {
+                    Text(event.summary)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            whoBadge(owners: owners)
+        }
+        // Finished = the WHOLE row drops its color — rail, facepile, wash,
+        // everything (owner 2026-08-08: "remove color from those elements
+        // completely"). Grayscale, not just dimming.
+        .grayscale(ended ? 1 : 0)
+        .opacity(phase == .future ? 0.55 : ended ? 0.5 : 1)
+        // One separator line for every row, late or not (owner 2026-08-08)
+        // — the varying leading columns were sliding it around.
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+        .listRowInsets(rowInsets)
+        .listRowBackground(tintBackground(owners: owners).grayscale(ended ? 1 : 0))
+    }
+
+    private func choreRow(
+        _ row: ChoresPageLogic.Row,
+        loaded: DayData,
+        late: Bool,
+        dayCaption: Bool = false
+    ) -> some View {
+        HStack(spacing: 10) {
+            if late {
+                timeCol("late", red: true)
+            } else if let time = row.dueTime {
+                Text(time)
+                    .font(.caption.weight(.medium))
+                    .monospacedDigit()
+                    .lineLimit(1)
                     .foregroundStyle(.secondary)
+                    .frame(width: 48, alignment: .trailing)
+                    .overlay(alignment: .leading) {
+                        Image(systemName: row.dueMode == .by ? "hourglass" : "clock")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.tertiary)
+                    }
+            }
+            circleButton(row, late: late)
+            DetailRow(route: .chore(row.lead), open: open) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            if let emoji = row.emoji { Text(emoji) }
+                            // Done = crossed AND greyed (owner 2026-08-07),
+                            // so finished work stops shouting.
+                            Text(row.title)
+                                .strikethrough(row.completed, color: .secondary)
+                                .foregroundStyle(row.completed ? Color.secondary : Color.primary)
+                        }
+                        // No pool caption any more (owner 2026-08-10:
+                        // "Anyone can take it" was noise) — the dashed
+                        // circle says it; pool rows caption like the rest.
+                        if let note = ChoresPageLogic.subtitle(row, today: clock.today, names: memberNames),
+                           row.completed {
+                            Text(note).font(.caption).foregroundStyle(.secondary)
+                        } else if dayCaption {
+                            Text(NavigationLogic.dayTitle(for: day))
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else if let due = row.dueDate, due != day,
+                                  let origin = DayLogic.dueOrigin(row.lead, today: clock.today) {
+                            // An off-day row wears its origin ("due
+                            // yesterday" in Catch Up), owner 2026-08-10.
+                            Text(origin).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            whoBadge(owners: row.owners)
+            // No star values on this page (owner 2026-08-09) — the cost
+            // lives in the chore detail and the Chores module.
+        }
+        // Done = the whole row goes gray — circle, avatar, star, wash
+        // (owner 2026-08-08).
+        .grayscale(row.completed ? 1 : 0)
+        .opacity(row.completed ? 0.6 : 1)
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+        .listRowInsets(rowInsets)
+        .listRowBackground(
+            tintBackground(owners: row.owners)
+                .grayscale(row.completed ? 1 : 0)
+        )
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            // Pool rows dismiss too (owner 2026-08-10): "I don't want this
+            // done any more" needs no owner. Claim is gone — checking a pool
+            // row takes it, and edit assigns it deliberately.
+            if !row.completed && phase != .past {
+                Button("Dismiss") { confirmDismiss = row.lead }.tint(.orange)
             }
         }
-        .frame(width: 34)
     }
 
-    private func tag(_ text: String, color: Color) -> some View {
+    private func circleButton(_ row: ChoresPageLogic.Row, late: Bool) -> some View {
+        Button {
+            if row.completed {
+                // Your own check reverts instantly; someone else's confirms
+                // (a shared row counts as someone else's if ANY of them is).
+                if ChoresPageLogic.needsUndoConfirm(row, me: context.session.memberID) {
+                    confirmUncheck = row
+                } else {
+                    Task { await act("uncomplete", on: row.lead) }
+                }
+            } else {
+                Task { await act("complete", on: row.lead) }
+            }
+        } label: {
+            if inFlight.contains(row.lead.id) {
+                ProgressView().frame(width: 44, height: 44)
+            } else {
+                // The doc's pool language: an unowned chore's check circle
+                // is ITSELF dashed — dashed but live, tap to do it.
+                Image(systemName: row.completed ? "checkmark.circle.fill"
+                    : row.isPool ? "circle.dashed" : "circle")
+                    .font(.system(size: 26))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(row.completed ? .green : late ? .red : .secondary)
+                    .frame(width: 44, height: 44)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(phase == .past)
+        .accessibilityLabel(row.completed ? "Completed" : "Not completed")
+    }
+
+    private func timeCol(_ text: String, red: Bool = false) -> some View {
         Text(text)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(color.opacity(0.15)))
+            .font(.caption.weight(red ? .bold : .medium))
+            .monospacedDigit()
+            .foregroundStyle(red ? .red : .secondary)
+            .frame(width: 48, alignment: .trailing)
     }
 
-    // MARK: Data
+    /// Facepile for owned rows; whole-family rows carry no badge — the
+    /// house glyph was noise (owner 2026-08-10).
+    @ViewBuilder
+    private func whoBadge(owners: [String]) -> some View {
+        if !owners.isEmpty {
+            HStack(spacing: -7) {
+                ForEach(owners.prefix(3), id: \.self) { id in
+                    if let member = members.first(where: { $0.id == id }) {
+                        MemberAvatarView(name: member.name, colorHex: member.color, avatar: nil, size: 22)
+                    }
+                }
+            }
+        }
+    }
+
+    /// The 10% wash: solid for one owner, diagonal bands for shared; neutral
+    /// (nil) for family and pool rows. Device-local setting.
+    @ViewBuilder
+    private func tintBackground(owners: [String]) -> some View {
+        if tintOn, !owners.isEmpty {
+            let colors = TodayLogic.tintColors(forOwners: owners, members: members)
+                .compactMap { Color(hex: $0) }
+            if let style = bandedTint(colors, opacity: washOpacity(colorScheme)) {
+                Rectangle().fill(style)
+            }
+        }
+    }
+
+    private var memberNames: [String: String] {
+        Dictionary(uniqueKeysWithValues: members.map { ($0.id, $0.name) })
+    }
+
+    // MARK: - Data + actions
 
     private func load() async {
         if data.value == nil { data = .loading }
-        // D02: query the HOUSEHOLD's day — the server frames [from,to) in
-        // household tz, and chores/routines always answer for household-today.
-        let today = clock.today
-        let tomorrow = clock.tomorrow
+        let range = DayLogic.fetchRange(centeredOn: day)
         do {
-            async let eventsCall = context.client.api.listEvents(.init(query: .init(from: today, to: tomorrow)))
+            async let eventsCall = context.client.api.listEvents(.init(query: .init(from: range.from, to: range.to)))
+            async let windowCall = context.client.api.listChoreOccurrences(
+                .init(query: .init(from: range.from, to: DayLogic.addDays(range.to, -1)))
+            )
+            async let actionableCall = context.client.api.listChoreOccurrences(.init())
+            async let boardCall = fetchBoard(day: day)
             async let membersCall = context.client.api.listMembers(.init())
-            async let choresCall = context.client.api.listChoreOccurrences(.init())
-            async let routinesCall = context.client.api.getRoutineBoard(.init())
-            async let balancesCall = context.client.api.getStarBalances(.init())
+            async let calendarsCall = context.client.api.listCalendars(.init())
 
-            var events: [Components.Schemas.EventOccurrence] = []
+            var loaded = DayData(events: [], windowChores: [], actionableChores: [], board: [], members: [], calendars: [])
             switch try await eventsCall {
-            case .ok(let ok): events = try ok.body.json.events
+            case .ok(let ok): loaded.events = try ok.body.json.events
             case .unauthorized: appState.handleUnauthorized(); return
             default: fail(); return
             }
-            var members: [Components.Schemas.Member] = []
+            switch try await windowCall {
+            case .ok(let ok): loaded.windowChores = try ok.body.json.occurrences
+            case .unauthorized: appState.handleUnauthorized(); return
+            default: fail(); return
+            }
+            switch try await actionableCall {
+            case .ok(let ok): loaded.actionableChores = try ok.body.json.occurrences
+            case .unauthorized: appState.handleUnauthorized(); return
+            default: fail(); return
+            }
+            loaded.board = await boardCall
             switch try await membersCall {
-            case .ok(let ok): members = try ok.body.json.members
+            case .ok(let ok): loaded.members = try ok.body.json.members
             case .unauthorized: appState.handleUnauthorized(); return
             default: fail(); return
             }
-            var occurrences: [Components.Schemas.ChoreOccurrence] = []
-            switch try await choresCall {
-            case .ok(let ok): occurrences = try ok.body.json.occurrences
+            switch try await calendarsCall {
+            case .ok(let ok): loaded.calendars = try ok.body.json.calendars
             case .unauthorized: appState.handleUnauthorized(); return
             default: fail(); return
             }
-            var routines: [Components.Schemas.RoutineBoardEntry] = []
-            var boardDate = today
-            switch try await routinesCall {
-            case .ok(let ok):
-                let board = try ok.body.json
-                routines = board.entries
-                boardDate = board.date
-            case .unauthorized: appState.handleUnauthorized(); return
-            default: fail(); return
-            }
-            // The whole family's balances — the hub shows everyone's chip.
-            var balances: [Components.Schemas.StarBalance] = []
-            switch try await balancesCall {
-            case .ok(let ok): balances = try ok.body.json.balances
-            case .unauthorized: appState.handleUnauthorized(); return
-            default: fail(); return
-            }
-            data = .loaded(TodayData(
-                events: events,
-                occurrences: occurrences,
-                routines: routines,
-                boardDate: boardDate,
-                members: members,
-                balances: balances
-            ))
+            data = .loaded(loaded)
         } catch {
-            // D08: a cancelled task is lifecycle, not an outage.
             guard !isTaskCancellation(error) else { return }
             fail()
         }
     }
 
-    /// D08: .failed may only replace a screen with NO data — a failed
-    /// refresh keeps the stale board silently.
     private func fail() {
-        if data.value == nil { data = .failed(failureCopy) }
+        if data.value == nil { data = .failed("Check the connection and try again.") }
     }
 
-    private var failureCopy: String {
-        "Your home server didn't answer. Pull down to try again."
+    /// Today and the recent past come from the real board. FUTURE days come
+    /// from the definitions — "future days show scheduled reality" (mock) —
+    /// because the board endpoint refuses dates actions can't land on; its
+    /// 422 must never sink the whole load.
+    private func fetchBoard(day: String) async -> [Components.Schemas.RoutineBoardEntry] {
+        if day > clock.today {
+            guard case .ok(let ok)? = try? await context.client.api.listRoutines(.init()),
+                  let routines = try? ok.body.json.routines
+            else { return [] }
+            return DayLogic.futureBoard(routines: routines, day: day)
+        }
+        guard case .ok(let ok)? = try? await context.client.api.getRoutineBoard(
+            .init(query: .init(date: day))
+        ) else { return [] }
+        return (try? ok.body.json.entries) ?? []
     }
 
-    /// The circle is a toggle (kiosk trust); both sides share the swipe
-    /// actions' optimistic apply + 409 plumbing.
-    private func toggle(_ chore: Components.Schemas.ChoreOccurrence) async {
-        switch TodayLogic.circleAction(for: chore) {
-        case .complete: await perform(.complete, on: chore)
-        case .uncomplete: await perform(.uncomplete, on: chore)
+    // MARK: - Routine cards (My Day's exact card — owner 2026-08-10 — plus
+    // the member wash on the MAIN row only; foldable, day-locked)
+
+    /// The header row wears the member wash; expanded task rows go bare
+    /// (owner 2026-08-10 — "just the routine main row, tasks without").
+    @ViewBuilder
+    private func routineRows(_ entry: Components.Schemas.RoutineBoardEntry) -> some View {
+        let done = entry.tasks.count(where: { $0.status != .open })
+        let total = entry.tasks.count
+        let complete = total > 0 && done == total
+        let streak = entry.streak + (complete ? 1 : 0)
+        let key = "\(day)|\(entry.routineId)|\(entry.memberId)"
+        let open = openRoutines.contains(key)
+        let locked = phase != .today
+
+        Button {
+            if open { openRoutines.remove(key) } else { openRoutines.insert(key) }
+        } label: {
+            HStack(spacing: 8) {
+                if let emoji = entry.emoji { Text(emoji) }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.title).font(.body.weight(.semibold))
+                    Text(routineSub(entry, done: done, total: total, complete: complete))
+                        .font(.caption)
+                        .foregroundStyle(complete ? .green : .secondary)
+                }
+                Spacer()
+                if streak >= 2 {
+                    Text("🔥 \(streak)").font(.subheadline)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(open ? 180 : 0))
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(entry.title), \(done) of \(total) done, \(open ? "expanded" : "collapsed")")
+        .listRowInsets(rowInsets)
+        .listRowBackground(tintBackground(owners: [entry.memberId]))
+
+        if open {
+            ForEach(entry.tasks, id: \.taskId) { task in
+                HStack(spacing: 10) {
+                    Button {
+                        guard !locked else { return }
+                        Task { await routineAct(task, entry: entry) }
+                    } label: {
+                        Image(systemName: task.status == .open
+                            ? (locked ? "circle.dashed" : "circle")
+                            : task.status == .skipped ? "arrow.uturn.right.circle" : "checkmark.circle.fill")
+                            .font(.system(size: 22))
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(task.status == .completed ? .green : task.status == .skipped ? .orange : .secondary)
+                            .opacity(locked ? 0.55 : 1)
+                            .frame(width: 40, height: 40)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(locked)
+                    if let emoji = task.emoji { Text(emoji).font(.subheadline) }
+                    Text(task.title)
+                        .font(.subheadline)
+                        .strikethrough(task.status == .completed, color: .secondary)
+                    Spacer()
+                    if task.starValue > 0 {
+                        Text("★ \(task.starValue)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
+                }
+                .padding(.leading, 6)
+                .listRowInsets(rowInsets)
+                .listRowSeparator(.hidden)
+            }
         }
     }
 
-    private enum RowCall {
-        case complete, uncomplete, claim, unclaim, dismiss
+    private func routineSub(
+        _ entry: Components.Schemas.RoutineBoardEntry,
+        done: Int,
+        total: Int,
+        complete: Bool
+    ) -> String {
+        let window = "\(entry.windowStart)–\(entry.windowEnd)"
+        return complete ? "\(window) · Done for today ✓" : "\(window) · \(done) of \(total)"
     }
 
-    private enum CallOutcome {
-        case ok(Components.Schemas.ChoreActionResult)
-        case unauthorized
-        case conflict(String?)
-        case failed
-    }
-
-    /// Every row action is optimistic: reflect the returned occurrence right
-    /// away, the SSE bump refetches the rest (balance, other rows).
-    private func perform(_ call: RowCall, on chore: Components.Schemas.ChoreOccurrence) async {
-        guard completingIDs.insert(chore.id).inserted else { return }
-        defer { completingIDs.remove(chore.id) }
+    private func routineAct(
+        _ task: Components.Schemas.RoutineBoardEntry.TasksPayloadPayload,
+        entry: Components.Schemas.RoutineBoardEntry
+    ) async {
         do {
-            switch try await send(call, id: chore.id) {
-            case .ok(let result):
-                apply(result, tappedID: chore.id)
-            case .unauthorized:
-                appState.handleUnauthorized()
-            case .conflict(let code):
-                actionError = TodayLogic.conflictMessage(code: code)
-                await load()
-            case .failed:
-                actionError = TodayLogic.conflictMessage(code: nil)
-                await load()
+            // Acts AS the card's member — the family page's kiosk grammar.
+            let body = Components.Schemas.RoutineTaskAction(date: day, memberId: entry.memberId)
+            switch task.status {
+            case .open:
+                _ = try await context.client.api.completeRoutineTask(
+                    .init(path: .init(id: task.taskId), body: .json(body))
+                )
+            default:
+                _ = try await context.client.api.uncompleteRoutineTask(
+                    .init(path: .init(id: task.taskId), body: .json(body))
+                )
             }
+            await load()
         } catch {
-            guard !isTaskCancellation(error) else { return } // D08
-            actionError = "Couldn't reach your home server. Try again."
+            guard !isTaskCancellation(error) else { return }
+            actionError = "Check the connection and try again."
         }
     }
 
-    /// One outcome from five per-operation Output enums. D21: the semantic
-    /// code is the Error body's `error` field; unclaim declares no 409.
-    private func send(_ call: RowCall, id: String) async throws -> CallOutcome {
-        let api = context.client.api
-        switch call {
-        case .complete:
-            switch try await api.completeChoreOccurrence(.init(path: .init(id: id))) {
-            case .ok(let ok): return .ok(try ok.body.json)
-            case .unauthorized: return .unauthorized
-            case .conflict(let conflict): return .conflict((try? conflict.body.json)?.error)
-            default: return .failed
+    private func act(_ name: String, on chore: DayLogic.Chore) async {
+        inFlight.insert(chore.id)
+        defer { inFlight.remove(chore.id) }
+        do {
+            switch name {
+            case "complete":
+                let output = try await context.client.api.completeChoreOccurrence(.init(path: .init(id: chore.id)))
+                if case .conflict(let c) = output { actionError = TimeLogic.conflictMessage(code: try? c.body.json.error) }
+            case "uncomplete":
+                let output = try await context.client.api.uncompleteChoreOccurrence(.init(path: .init(id: chore.id)))
+                if case .conflict(let c) = output { actionError = TimeLogic.conflictMessage(code: try? c.body.json.error) }
+            case "dismiss":
+                let output = try await context.client.api.dismissChoreOccurrence(.init(path: .init(id: chore.id)))
+                if case .conflict(let c) = output { actionError = TimeLogic.conflictMessage(code: try? c.body.json.error) }
+            case "claim":
+                let output = try await context.client.api.claimChoreOccurrence(.init(path: .init(id: chore.id)))
+                if case .conflict(let c) = output { actionError = TimeLogic.conflictMessage(code: try? c.body.json.error) }
+            default: break
             }
-        case .uncomplete:
-            // The server revokes the award (409 insufficient_stars when spent).
-            switch try await api.uncompleteChoreOccurrence(.init(path: .init(id: id))) {
-            case .ok(let ok): return .ok(try ok.body.json)
-            case .unauthorized: return .unauthorized
-            case .conflict(let conflict): return .conflict((try? conflict.body.json)?.error)
-            default: return .failed
-            }
-        case .claim:
-            switch try await api.claimChoreOccurrence(.init(path: .init(id: id))) {
-            case .ok(let ok): return .ok(try ok.body.json)
-            case .unauthorized: return .unauthorized
-            case .conflict(let conflict): return .conflict((try? conflict.body.json)?.error)
-            default: return .failed
-            }
-        case .unclaim:
-            switch try await api.unclaimChoreOccurrence(.init(path: .init(id: id))) {
-            case .ok(let ok): return .ok(try ok.body.json)
-            case .unauthorized: return .unauthorized
-            default: return .failed
-            }
-        case .dismiss:
-            switch try await api.dismissChoreOccurrence(.init(path: .init(id: id))) {
-            case .ok(let ok): return .ok(try ok.body.json)
-            case .unauthorized: return .unauthorized
-            case .conflict(let conflict): return .conflict((try? conflict.body.json)?.error)
-            default: return .failed
-            }
+            await load()
+        } catch {
+            guard !isTaskCancellation(error) else { return }
+            actionError = "Check the connection and try again."
         }
     }
+}
 
-    /// Swap (or drop) the tapped row. Occurrence ids are synthetic and may
-    /// change — match on the id we tapped, take whatever comes back.
-    private func apply(_ result: Components.Schemas.ChoreActionResult, tappedID: String) {
-        guard var today = data.value else { return }
-        if let index = today.occurrences.firstIndex(where: { $0.id == tappedID }) {
-            if let payload = result.occurrence {
-                today.occurrences[index] = TodayLogic.occurrence(from: payload)
-            } else {
-                today.occurrences.remove(at: index)
-            }
+/// The dashed ghost-row look, shared by the day pages' "+ New" menus.
+struct GhostLabel: View {
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "plus")
+            Text(title)
         }
-        data = .loaded(today)
+        .font(.subheadline.weight(.medium))
+        .foregroundStyle(Color.accentColor)
+        .frame(maxWidth: .infinity, minHeight: 40)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                .foregroundStyle(.tertiary)
+        )
+        .contentShape(Rectangle())
+    }
+}
+
+/// The hairline now-line as a zero-height list row (shared by the day pages).
+struct NowLineRow: View {
+    let minute: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(minute)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.red)
+                .monospacedDigit()
+            Circle().fill(.red).frame(width: 5, height: 5)
+            Rectangle().fill(.red).frame(height: 1)
+        }
+        .frame(height: 1)
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 0))
+        .listRowSeparator(.hidden)
+        // List reserves ~44pt per row; the hairline must hug the seam.
+        .environment(\.defaultMinListRowHeight, 1)
+        .accessibilityLabel("Now, \(minute)")
     }
 }

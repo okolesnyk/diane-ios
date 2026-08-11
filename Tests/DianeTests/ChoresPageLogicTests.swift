@@ -311,6 +311,17 @@ struct ChoresPageLogicTests {
         #expect(!later.isEmpty)
     }
 
+    /// Owner 2026-08-10: both Catch ups read oldest debt first, pool last.
+    @Test func catchUpReadsOldestDebtFirstPoolLast() {
+        let out = sections(actionable: [
+            occ(id: "new", choreId: "new", dueDate: "2026-08-05", dueTime: "16:00", late: true, assignee: sib),
+            occ(id: "old", choreId: "old", dueDate: "2026-06-18", late: true, assignee: kid),
+            occ(id: "pool-old", choreId: "pool", dueDate: "2026-06-01", late: true),
+        ])
+        #expect(out[0].kind == .catchUp)
+        #expect(out[0].rows.map(\.id) == ["old", "new", "pool-old"])
+    }
+
     @Test func subtitleNamesTheDeadlineAndTheLateOrigin() {
         let deadline = ChoresPageLogic.rows([
             occ(id: "g", choreId: "garage", dueDate: "2026-08-15", dueMode: .by),
@@ -320,7 +331,7 @@ struct ChoresPageLogicTests {
         let late = ChoresPageLogic.rows([
             occ(id: "k", choreId: "kit", dueDate: "2026-08-05", late: true, assignee: sib),
         ])[0]
-        #expect(ChoresPageLogic.subtitle(late, today: today, names: [:]) == "Due Aug 5")
+        #expect(ChoresPageLogic.subtitle(late, today: today, names: [:]) == "Due Wed, Aug 5")
 
         let shelf = ChoresPageLogic.rows([occ(id: "w", choreId: "windows")])[0]
         #expect(ChoresPageLogic.subtitle(shelf, today: today, names: [:]) == nil)

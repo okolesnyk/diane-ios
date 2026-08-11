@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Page 5 (M9e design): the Chores module — the whole workspace. The Family
 /// Day chip row (rings, late dots, tap/solo) sits above three tabs and
-/// filters all of them; every row wears the approved My Day / Family Day
+/// filters all of them; every row wears the approved day-page
 /// anatomy — check circle leading, emoji inline, facepile, orange star — so
 /// this reads as one application, not two.
 struct ChoresPageView: View {
@@ -26,7 +26,7 @@ struct ChoresPageView: View {
     /// The one earned moment: a star floats up off the row just completed.
     @State private var floatingStar: String?
 
-    /// Member tint — the same device-local switch Family Day and My Day read.
+    /// Member tint — the same device-local switch the Today page reads.
     @AppStorage("memberTint") private var tintOn = true
     @Environment(\.colorScheme) private var colorScheme
 
@@ -100,7 +100,7 @@ struct ChoresPageView: View {
             )
         }
         .alert(
-            TodayLogic.dismissPrompt(confirmDismiss?.title ?? ""),
+            TimeLogic.dismissPrompt(confirmDismiss?.title ?? ""),
             isPresented: Binding(get: { confirmDismiss != nil }, set: { if !$0 { confirmDismiss = nil } })
         ) {
             Button("Dismiss", role: .destructive) {
@@ -133,13 +133,13 @@ struct ChoresPageView: View {
         }
     }
 
-    // MARK: - Chips (Family Day's row, plus the Anyone pseudo-member)
+    // MARK: - Chips (the Today page's row, plus the Anyone pseudo-member)
 
     private var chips: some View {
         let live = data.value?.actionable ?? []
         return HStack(spacing: 14) {
             ForEach(members, id: \.id) { member in
-                let chip = FamilyDayLogic.chip(
+                let chip = TodayLogic.chip(
                     for: member.id,
                     chores: live,
                     board: data.value?.board ?? []
@@ -154,7 +154,7 @@ struct ChoresPageView: View {
 
     private func memberChip(
         _ member: Components.Schemas.Member,
-        chip: FamilyDayLogic.ChipState
+        chip: TodayLogic.ChipState
     ) -> some View {
         let isOn = effective.contains(member.id)
         return VStack(spacing: 3) {
@@ -192,7 +192,7 @@ struct ChoresPageView: View {
         )
     }
 
-    /// Family Day's pool language verbatim: dashed and colorless, no hue.
+    /// The Today page's pool language verbatim: dashed and colorless, no hue.
     private func anyoneChip(count: Int) -> some View {
         let isOn = effective.contains(ChoresPageLogic.poolID)
         return VStack(spacing: 3) {
@@ -301,7 +301,7 @@ struct ChoresPageView: View {
         }
     }
 
-    // MARK: - Row (My Day / Family Day anatomy, verbatim)
+    // MARK: - Row (the day-page anatomy, verbatim)
 
     private func choreRow(_ row: ChoresPageLogic.Row) -> some View {
         HStack(spacing: 10) {
@@ -360,7 +360,7 @@ struct ChoresPageView: View {
         }
     }
 
-    /// Family Day's furniture: facepile for owned rows, nothing for the pool
+    /// The Today page's furniture: facepile for owned rows, nothing for the pool
     /// — its dashed circle already says "anyone's".
     @ViewBuilder
     private func whoBadge(owners: [String]) -> some View {
@@ -453,17 +453,17 @@ struct ChoresPageView: View {
             case .complete:
                 let output = try await context.client.api.completeChoreOccurrence(.init(path: .init(id: id)))
                 if case .conflict(let conflict) = output {
-                    actionError = TodayLogic.conflictMessage(code: try? conflict.body.json.error)
+                    actionError = TimeLogic.conflictMessage(code: try? conflict.body.json.error)
                 }
             case .uncomplete:
                 let output = try await context.client.api.uncompleteChoreOccurrence(.init(path: .init(id: id)))
                 if case .conflict(let conflict) = output {
-                    actionError = TodayLogic.conflictMessage(code: try? conflict.body.json.error)
+                    actionError = TimeLogic.conflictMessage(code: try? conflict.body.json.error)
                 }
             case .dismiss:
                 let output = try await context.client.api.dismissChoreOccurrence(.init(path: .init(id: id)))
                 if case .conflict(let conflict) = output {
-                    actionError = TodayLogic.conflictMessage(code: try? conflict.body.json.error)
+                    actionError = TimeLogic.conflictMessage(code: try? conflict.body.json.error)
                 }
             }
             await load()

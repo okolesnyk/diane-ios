@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// ONE day cell for every page that shows days: My Day's and Family Day's
+/// ONE day cell for every page that shows days: the Today page's
 /// 7-day strips, and the Calendar's week row and month grid. Same weekday
 /// grammar, same selection pill, same dots — a day looks like a day
 /// everywhere (owner 2026-08-06: "consistency is key").
@@ -55,19 +55,19 @@ struct DayCell: View {
     }
 }
 
-/// The week strip shared by My Day and Family Day: the week containing the
+/// The week strip shared by the day pages: the week containing the
 /// selected day, exactly like the Calendar's row. Tapping a day never moves
 /// the week; swiping the strip pages a whole week (owner 2026-08-06).
 struct DayStrip: View {
     let day: String
     let today: String
     /// Per-day load preview.
-    let dots: (String) -> MyDayLogic.DayDots
+    let dots: (String) -> DayLogic.DayDots
     let onSelect: (String) -> Void
 
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(MyDayLogic.weekDays(containing: day)) { stripDay in
+            ForEach(DayLogic.weekDays(containing: day)) { stripDay in
                 let d = dots(stripDay.date)
                 DayCell(
                     date: stripDay.date,
@@ -91,7 +91,7 @@ struct DayStrip: View {
         .gesture(
             DragGesture(minimumDistance: 30).onEnded { value in
                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                onSelect(MyDayLogic.pagedStripTarget(
+                onSelect(DayLogic.pagedStripTarget(
                     from: day,
                     forward: value.translation.width < 0
                 ))

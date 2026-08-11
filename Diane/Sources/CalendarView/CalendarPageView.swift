@@ -41,7 +41,7 @@ struct CalendarPageView: View {
     struct PageData: Equatable {
         var events: [Components.Schemas.EventOccurrence]
         /// TODAY's actionable chores — the chips' progress rings + late dots.
-        var todayChores: [MyDayLogic.Chore]
+        var todayChores: [DayLogic.Chore]
         var members: [Components.Schemas.Member]
         var calendars: [Components.Schemas.Calendar]
         /// The [from,to) range the events cover — refetch when it moves.
@@ -173,7 +173,7 @@ struct CalendarPageView: View {
         .frame(minWidth: 280)
     }
 
-    // MARK: - Chips (Family Day's filter, approved harmonization)
+    // MARK: - Chips (the Today page's filter, approved harmonization)
 
     private var members: [Components.Schemas.Member] { data.value?.members ?? [] }
     private var allIDs: [String] { members.map(\.id) }
@@ -183,7 +183,7 @@ struct CalendarPageView: View {
     private var chips: some View {
         HStack(spacing: 14) {
             ForEach(members, id: \.id) { member in
-                let chip = FamilyDayLogic.chip(for: member.id, chores: data.value?.todayChores ?? [])
+                let chip = TodayLogic.chip(for: member.id, chores: data.value?.todayChores ?? [])
                 let isOn = effectiveSelected.contains(member.id)
                 VStack(spacing: 3) {
                     ZStack {
@@ -223,7 +223,7 @@ struct CalendarPageView: View {
             ? logic.monthQueryRange(containing: anchorDate)
             : logic.week.queryRange(anchor: anchorDate)
         // The rolling agenda shows selected+3 — extend past the header window.
-        let agendaEnd = MyDayLogic.addDays(day, 4)
+        let agendaEnd = DayLogic.addDays(day, 4)
         return (base.from, max(base.to, agendaEnd))
     }
 
@@ -268,7 +268,7 @@ struct CalendarPageView: View {
         } else {
             // Same landing rule as the day pages' strips (owner 2026-08-08):
             // forward = next week's first day, back = previous week's last.
-            select(MyDayLogic.pagedStripTarget(
+            select(DayLogic.pagedStripTarget(
                 from: day,
                 forward: direction > 0,
                 firstWeekday: logic.calendar.firstWeekday
@@ -343,9 +343,9 @@ struct CalendarPageView: View {
             ScrollViewReader { proxy in
                 List {
                     ForEach(0..<4, id: \.self) { offset in
-                        let d = MyDayLogic.addDays(day, offset)
+                        let d = DayLogic.addDays(day, offset)
                         let rows = logic.week.agenda(day: d, events: loaded.events)
-                            .filter { FamilyDayLogic.visible($0, selected: effectiveSelected) }
+                            .filter { TodayLogic.visible($0, selected: effectiveSelected) }
                         Section {
                             if rows.isEmpty && offset != 0 {
                                 Text("Nothing planned").font(.caption).foregroundStyle(.tertiary)
@@ -355,9 +355,9 @@ struct CalendarPageView: View {
                                 // Finished events grey in place, exactly like
                                 // Family Day (owner 2026-08-09): a past day has
                                 // ended wholesale; today asks hasEnded.
-                                let ended = d < clock.today || (d == clock.today && FamilyDayLogic.hasEnded(
+                                let ended = d < clock.today || (d == clock.today && TodayLogic.hasEnded(
                                     event,
-                                    minute: TodayLogic.minutes(clock.minute) ?? 0,
+                                    minute: TimeLogic.minutes(clock.minute) ?? 0,
                                     day: d,
                                     timeZone: clock.timeZone
                                 ))
@@ -382,7 +382,7 @@ struct CalendarPageView: View {
                         } header: {
                             // One header anatomy: the date, always — today is
                             // marked by color, never by replacing the date.
-                            Text(NavigationLogic.myDayTitle(for: d))
+                            Text(NavigationLogic.dayTitle(for: d))
                                 .font(.caption.weight(.semibold))
                                 .textCase(.uppercase)
                                 .foregroundStyle(d == clock.today ? Color.accentColor : .secondary)
@@ -439,7 +439,7 @@ struct CalendarPageView: View {
     }
 
     private func railColor(_ event: Components.Schemas.EventOccurrence, loaded: PageData) -> Color {
-        Color(hex: MyDayLogic.railColorHex(for: event, calendars: loaded.calendars) ?? "#34c759")
+        Color(hex: DayLogic.railColorHex(for: event, calendars: loaded.calendars) ?? "#34c759")
     }
 
     /// Whole-family rows carry no badge — the house glyph was noise
@@ -467,11 +467,11 @@ struct CalendarPageView: View {
         if let loaded = data.value {
             let blocks = logic.dayBlocks(
                 day: day,
-                events: loaded.events.filter { !$0.allDay && FamilyDayLogic.visible($0, selected: effectiveSelected) }
+                events: loaded.events.filter { !$0.allDay && TodayLogic.visible($0, selected: effectiveSelected) }
             )
             let allDay = loaded.events.filter {
                 $0.allDay && logic.week.occursOn(day: day, occurrence: $0)
-                    && FamilyDayLogic.visible($0, selected: effectiveSelected)
+                    && TodayLogic.visible($0, selected: effectiveSelected)
             }
             VStack(spacing: 0) {
                 // All-day events PIN above the grid (owner 2026-08-10) —
@@ -523,7 +523,7 @@ struct CalendarPageView: View {
         let hour = CalendarPageLogic.initialScrollHour(
             blocks: blocks,
             isToday: day == clock.today,
-            nowMinutes: TodayLogic.minutes(clock.minute)
+            nowMinutes: TimeLogic.minutes(clock.minute)
         )
         if animated {
             withAnimation { proxy.scrollTo("hour-\(hour)", anchor: .top) }
@@ -639,7 +639,7 @@ struct CalendarPageView: View {
                     .allowsHitTesting(false)
                 }
                 // Hairline now-line, today only.
-                if day == clock.today, let now = TodayLogic.minutes(clock.minute) {
+                if day == clock.today, let now = TimeLogic.minutes(clock.minute) {
                     HStack(spacing: 4) {
                         Text(clock.minute)
                             .font(.system(size: 9, weight: .bold)).monospacedDigit()

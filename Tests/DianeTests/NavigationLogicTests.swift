@@ -86,8 +86,8 @@ import Testing
             .orderedTiles(enabled: all) == [.rewards, .calendar, .chores, .routines])
     }
 
-    @Test func myDayTitleFormatsTheHouseholdDay() {
-        #expect(NavigationLogic.myDayTitle(for: "2026-08-05").contains("5"))
-        #expect(NavigationLogic.myDayTitle(for: "not-a-date") == "My Day")
+    @Test func dayTitleFormatsTheHouseholdDay() {
+        #expect(NavigationLogic.dayTitle(for: "2026-08-05").contains("5"))
+        #expect(NavigationLogic.dayTitle(for: "not-a-date") == "Today")
     }
 }

@@ -41,11 +41,11 @@ enum ChoresPageLogic {
     /// The page paints from the week, then fills Later in behind it — the
     /// quarter sweep is the big fetch and nothing on screen waits for it.
     static func weekRange(today: String) -> (from: String, to: String) {
-        (today, MyDayLogic.addDays(today, weekSpanDays))
+        (today, DayLogic.addDays(today, weekSpanDays))
     }
 
     static func laterRange(today: String) -> (from: String, to: String) {
-        (MyDayLogic.addDays(today, weekSpanDays + 1), MyDayLogic.addDays(today, laterSpanDays))
+        (DayLogic.addDays(today, weekSpanDays + 1), DayLogic.addDays(today, laterSpanDays))
     }
 
     // MARK: - Rows (a shared chore is ONE row)
@@ -97,6 +97,17 @@ enum ChoresPageLogic {
         }
     }
 
+    /// Catch up reads oldest debt first (owner 2026-08-10 — the pages
+    /// disagreed): date, then time, then title — pool rows sink last, the
+    /// standing rule.
+    static func debtSorted(_ rows: [Row]) -> [Row] {
+        let sorted = rows.sorted {
+            ($0.dueDate ?? "", $0.dueTime ?? "99:99", $0.title, $0.id)
+                < ($1.dueDate ?? "", $1.dueTime ?? "99:99", $1.title, $1.id)
+        }
+        return sorted.filter { !$0.isPool } + sorted.filter(\.isPool)
+    }
+
     /// Timed first in clock order, then untimed by title. Deterministic.
     static func order(_ a: Row, _ b: Row) -> Bool {
         (a.dueTime ?? "99:99", a.title, a.id) < (b.dueTime ?? "99:99", b.title, b.id)
@@ -107,7 +118,7 @@ enum ChoresPageLogic {
     /// `effective` is the resolved chip set (never empty — "everyone" is
     /// expanded by the caller) and carries `poolID` when Anyone is on.
     /// Soloing a member keeps the pool visible: unowned chores are everyone's
-    /// business, the Family Day rule.
+    /// business, the Today page's rule.
     static func isVisible(_ row: Row, effective: Set<String>) -> Bool {
         row.isPool
             ? effective.contains(poolID)
@@ -143,7 +154,7 @@ enum ChoresPageLogic {
     static func effectivelyLate(_ row: Row, today: String, minute: String?) -> Bool {
         guard let minute else { return row.late }
         return row.late || row.occurrences.contains {
-            MyDayLogic.effectivelyLate($0, today: today, minute: minute)
+            DayLogic.effectivelyLate($0, today: today, minute: minute)
         }
     }
 
@@ -155,18 +166,18 @@ enum ChoresPageLogic {
         effective: Set<String>,
         minute: String? = nil
     ) -> [Section] {
-        let weekEnd = MyDayLogic.addDays(today, weekSpanDays)
+        let weekEnd = DayLogic.addDays(today, weekSpanDays)
         let live = rows(actionable).filter { isVisible($0, effective: effective) }
         let dated = rows(window).filter { isVisible($0, effective: effective) }
 
         var out: [Section] = []
 
-        // Catch up — every late chore, pulled out of its day group (My Day's
-        // pattern; the owner asked for it on All as well as Scheduled).
+        // Catch up — every late chore, pulled out of its day group (the day
+        // pages' pattern; the owner asked for it on All as well as Scheduled).
         if tab != .anytime {
-            let late = live
-                .filter { effectivelyLate($0, today: today, minute: minute) && !$0.completed }
-                .sorted(by: order)
+            let late = debtSorted(live.filter {
+                effectivelyLate($0, today: today, minute: minute) && !$0.completed
+            })
             if !late.isEmpty {
                 out.append(.init(
                     id: "catchup", title: "Catch up", kind: .catchUp,
@@ -196,7 +207,7 @@ enum ChoresPageLogic {
         }
         let byDate = Dictionary(grouping: grouped) { $0.dueDate! }
         for offset in 0...weekSpanDays {
-            let date = MyDayLogic.addDays(today, offset)
+            let date = DayLogic.addDays(today, offset)
             guard let dayRows = byDate[date], !dayRows.isEmpty else { continue }
             let sorted = dayRows.sorted(by: order)
             out.append(.init(
@@ -214,7 +225,7 @@ enum ChoresPageLogic {
         // ONE row per chore (its soonest), never a daily chore fanned out
         // across three months. The actionable view chips in whatever sits
         // beyond even the window's reach.
-        let windowEnd = MyDayLogic.addDays(today, laterSpanDays)
+        let windowEnd = DayLogic.addDays(today, laterSpanDays)
         let beyond = dated.filter { $0.dueDate.map { $0 > weekEnd } ?? false }
             + live.filter { row in !row.late && (row.dueDate.map { $0 > windowEnd } ?? false) }
         var seenChores: Set<String> = []
@@ -245,7 +256,7 @@ enum ChoresPageLogic {
     static func dayTitle(_ date: String, today: String) -> String {
         let long = longDate(date)
         if date == today { return long.isEmpty ? "Today" : "Today — \(long)" }
-        if date == MyDayLogic.addDays(today, 1) {
+        if date == DayLogic.addDays(today, 1) {
             return long.isEmpty ? "Tomorrow" : "Tomorrow — \(long)"
         }
         return long.isEmpty ? date : long
@@ -278,10 +289,11 @@ enum ChoresPageLogic {
             else { return nil }
             return "done by \(name)"
         }
-        // No "Late —" prefix (owner 2026-08-10): the Catch up lane and the
-        // red styling already say it.
+        // The day pages' exact grammar, no "Late —" prefix (owner
+        // 2026-08-10 — the two Catch ups disagreed): "Due yesterday 16:00",
+        // "Due Thu, Jun 18"; the red lane already says late.
         if row.late {
-            return row.dueDate.map { "Due \(ChoresManageLogic.monthDay($0))" }
+            return DayLogic.dueOrigin(row.lead, today: today)
         }
         // Just the date (owner 2026-08-10 — "flexible until then" was noise).
         if row.dueMode == .by, let due = row.dueDate {

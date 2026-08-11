@@ -21,8 +21,8 @@ enum ChoreHistoryLogic {
     static func range(_ period: Period, today: String) -> (from: String, to: String)? {
         switch period {
         case .today: (today, today)
-        case .week: (MyDayLogic.addDays(today, -6), today)
-        case .month: (MyDayLogic.addDays(today, -29), today)
+        case .week: (DayLogic.addDays(today, -6), today)
+        case .month: (DayLogic.addDays(today, -29), today)
         case .all: nil
         }
     }
@@ -60,8 +60,8 @@ enum ChoreHistoryLogic {
         var order: [String] = []
         var byDay: [String: [Entry]] = [:]
         for entry in entries {
-            let day = TodayLogic.parseInstant(entry.occurredAt)
-                .map { TodayLogic.dateString(for: $0, timeZone: timeZone) }
+            let day = TimeLogic.parseInstant(entry.occurredAt)
+                .map { TimeLogic.dateString(for: $0, timeZone: timeZone) }
                 ?? entry.dueDate ?? ""
             if byDay[day] == nil { order.append(day) }
             byDay[day, default: []].append(entry)
@@ -260,7 +260,7 @@ struct ChoreHistoryView: View {
         let lead = row.lead
         let dismissed = lead.action == .dismissed
         // Every actor of the shared group, one circle each (owner 2026-08-09,
-        // like Family Day) — deduped, never a typed name.
+        // like the Today page) — deduped, never a typed name.
         var seen: Set<String> = []
         let crew = row.entries.compactMap { entry in
             ChoreHistoryLogic.actor(entry).flatMap { id in
@@ -273,7 +273,7 @@ struct ChoreHistoryView: View {
             Text(lead.title)
                 .foregroundStyle(dismissed ? Color.secondary : Color.primary)
             Spacer(minLength: 8)
-            Text(TodayLogic.timeLabel(lead.occurredAt, timeZone: clock.timeZone) ?? "")
+            Text(TimeLogic.timeLabel(lead.occurredAt, timeZone: clock.timeZone) ?? "")
                 .font(.caption)
                 .monospacedDigit()
                 .foregroundStyle(.tertiary)

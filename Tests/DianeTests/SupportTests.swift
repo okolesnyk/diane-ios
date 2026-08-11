@@ -105,6 +105,31 @@ import Testing
         }
     }
 
+    // The app-wide chip filter — persisted on-device per member (owner
+    // 2026-08-10: "remember member filter even if I restart the App").
+    @MainActor
+    @Suite struct MemberFilterPersistenceTests {
+        @Test func filterSurvivesRelaunchPerMember() {
+            let defaults = UserDefaults(suiteName: "filter-tests-\(UUID().uuidString)")!
+            let marta = MemberFilterStore(memberID: "m-marta", defaults: defaults)
+            #expect(!marta.isFiltered) // fresh = everyone
+            // From everyone, a tap EXCLUDES the tapped member (chip rule).
+            marta.toggle("a", all: ["a", "b", "c"])
+            #expect(marta.selected == ["b", "c"])
+            // A fresh store (relaunch) reads it back; another member doesn't.
+            #expect(MemberFilterStore(memberID: "m-marta", defaults: defaults).selected == ["b", "c"])
+            #expect(MemberFilterStore(memberID: "m-alex", defaults: defaults).selected.isEmpty)
+            // Everyone stores as empty.
+            marta.clear()
+            #expect(MemberFilterStore(memberID: "m-marta", defaults: defaults).selected.isEmpty)
+            // A departed member's stale filter degrades to everyone.
+            marta.solo("ghost")
+            let revived = MemberFilterStore(memberID: "m-marta", defaults: defaults)
+            #expect(revived.effective(all: ["a", "b"]) == ["a", "b"])
+            #expect(revived.isOn("a", all: ["a", "b"]))
+        }
+    }
+
     // The household frame for "today"/windows — D02/D03/D05 root fix.
     @MainActor
     @Suite struct HouseholdClockTests {

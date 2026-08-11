@@ -1,14 +1,15 @@
 import DianeKit
 import Foundation
 
-/// Page 2 (M9e design): the pure math behind Family Day — member chips with
+/// The Today page (born Family Day, renamed 2026-08-10): the pure math —
+/// member chips with
 /// progress rings + late dots, the river (one time-ordered family stream,
 /// whole-family rows once, morning fold for the finished past), catch up,
-/// the up-for-grabs pool, and the member tint washes. Reuses MyDayLogic for
+/// the up-for-grabs pool, and the member tint washes. Reuses DayLogic for
 /// date math, day membership, rails, and the strip.
-enum FamilyDayLogic {
-    typealias Event = MyDayLogic.Event
-    typealias Chore = MyDayLogic.Chore
+enum TodayLogic {
+    typealias Event = DayLogic.Event
+    typealias Chore = DayLogic.Chore
     typealias Member = Components.Schemas.Member
 
     // MARK: - Chips (progress rings + late dots; tap = filter, double = solo)
@@ -82,8 +83,8 @@ enum FamilyDayLogic {
 
         func sortKey(timeZone: TimeZone) -> Int {
             switch self {
-            case .event(let event): MyDayLogic.TimelineItem.event(event).sortKey(timeZone: timeZone)
-            case .chores(let row): MyDayLogic.TimelineItem.chore(row.lead).sortKey(timeZone: timeZone)
+            case .event(let event): DayLogic.TimelineItem.event(event).sortKey(timeZone: timeZone)
+            case .chores(let row): DayLogic.TimelineItem.chore(row.lead).sortKey(timeZone: timeZone)
             }
         }
 
@@ -122,7 +123,7 @@ enum FamilyDayLogic {
         events: [Event],
         chores: [Chore],
         selected: Set<String>,
-        phase: MyDayLogic.DayPhase,
+        phase: DayLogic.DayPhase,
         minute: String,
         timeZone: TimeZone,
         today: String? = nil,
@@ -142,8 +143,8 @@ enum FamilyDayLogic {
             // Late-done rows stay too (owner 2026-08-09): a checked catch-up
             // reads as "the catch-up got done", not a fresh on-time ✓.
             let rowLate = row.occurrences.contains {
-                MyDayLogic.effectivelyLate($0, today: today ?? "", minute: minute)
-                    || MyDayLogic.lateWhenDone($0, timeZone: timeZone)
+                DayLogic.effectivelyLate($0, today: today ?? "", minute: minute)
+                    || DayLogic.lateWhenDone($0, timeZone: timeZone)
             }
             if phase != .future && rowLate {
                 if pool { poolCatchUp.append(row) } else { out.catchUp.append(row) }
@@ -157,7 +158,9 @@ enum FamilyDayLogic {
             // Dated for another day: the Chores page owns those (owner
             // 2026-08-10 — Tomorrow and the 30-day shelf are gone).
         }
-        out.catchUp += poolCatchUp
+        // Oldest debt first, pool last — the Chores page's exact Catch up
+        // order (owner 2026-08-10: the two pages disagreed).
+        out.catchUp = ChoresPageLogic.debtSorted(out.catchUp + poolCatchUp)
         out.dueToday += poolDueToday
         out.anytime += poolAnytime
 
@@ -173,9 +176,9 @@ enum FamilyDayLogic {
         return out
     }
 
-    /// Where the hairline sits among river items (mirrors My Day's rule).
+    /// Where the hairline now-line sits among river items.
     static func nowIndex(items: [RiverItem], minute: String, timeZone: TimeZone) -> Int? {
-        guard let now = TodayLogic.minutes(minute) else { return nil }
+        guard let now = TimeLogic.minutes(minute) else { return nil }
         for (index, item) in items.enumerated() where item.sortKey(timeZone: timeZone) > now {
             return index
         }
@@ -188,12 +191,12 @@ enum FamilyDayLogic {
     static func hasEnded(_ event: Event, minute: Int, day: String, timeZone: TimeZone) -> Bool {
         guard !event.allDay else { return false }
         guard let endInstant = event.endsAt ?? event.startsAt,
-              let end = TodayLogic.parseInstant(endInstant)
+              let end = TimeLogic.parseInstant(endInstant)
         else { return false }
-        let endDay = TodayLogic.dateString(for: end, timeZone: timeZone)
+        let endDay = TimeLogic.dateString(for: end, timeZone: timeZone)
         if endDay > day { return false } // still running into a later day
         if endDay < day { return true }
-        return TodayLogic.clockMinutes(of: end, timeZone: timeZone) <= minute
+        return TimeLogic.clockMinutes(of: end, timeZone: timeZone) <= minute
     }
 
     // MARK: - Member tint (device-local setting; wash rows in owner colors)
@@ -219,9 +222,9 @@ enum FamilyDayLogic {
         events: [Event],
         chores: [Chore],
         timeZone: TimeZone
-    ) -> MyDayLogic.DayDots {
-        MyDayLogic.DayDots(
-            hasEvents: events.contains { MyDayLogic.onDay($0, date: date, timeZone: timeZone) },
+    ) -> DayLogic.DayDots {
+        DayLogic.DayDots(
+            hasEvents: events.contains { DayLogic.onDay($0, date: date, timeZone: timeZone) },
             hasChores: chores.contains { $0.dueDate == date }
         )
     }

@@ -4,31 +4,44 @@ import Observation
 /// The member chip filter, shared by every page that shows one (owner
 /// 2026-08-06: "if on Family Day I picked myself and my wife and then I move
 /// to Calendar it stays me and my wife"). This supersedes the mock's
-/// "filter resets when you leave the tab" rule — one filter, app-wide, for
-/// the session.
+/// "filter resets when you leave the tab" rule — one filter, app-wide.
 ///
-/// Empty = everyone. Kept in memory only: a fresh launch looks at the whole
-/// family again.
+/// It survives relaunch too (owner 2026-08-10): stored on the DEVICE in
+/// UserDefaults, per signed-in member, so a shared phone never leaks one
+/// member's filter onto another's sign-in. Empty = everyone; a stored
+/// selection whose members all left the household degrades to everyone.
 @MainActor
 @Observable
 final class MemberFilterStore {
-    private(set) var selected: Set<String> = []
+    private let key: String
+    @ObservationIgnored private let defaults: UserDefaults
+    private(set) var selected: Set<String>
+
+    init(memberID: String = "", defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        key = "memberFilter.\(memberID)"
+        selected = Set(
+            (defaults.string(forKey: key) ?? "").split(separator: ",").map(String.init)
+        )
+    }
 
     func isOn(_ id: String, all: [String]) -> Bool {
-        selected.isEmpty || selected.contains(id)
+        let live = selected.intersection(all)
+        return live.isEmpty || live.contains(id)
     }
 
     var isFiltered: Bool { !selected.isEmpty }
 
     func effective(all: [String]) -> Set<String> {
-        selected.isEmpty ? Set(all) : selected
+        let live = selected.intersection(all)
+        return live.isEmpty ? Set(all) : live
     }
 
     /// Tap: add/remove; emptying it — or selecting everyone — means everyone.
     func toggle(_ id: String, all: [String]) {
-        var next = FamilyDayLogic.toggledFilter(effective(all: all), all: all, tapping: id)
+        var next = TodayLogic.toggledFilter(effective(all: all), all: all, tapping: id)
         if next.count == all.count { next = [] }
-        selected = next
+        save(next)
     }
 
     /// Long-press: solo this member, or return to everyone if already solo.
@@ -39,10 +52,15 @@ final class MemberFilterStore {
     /// Solo a set — Chores solos a member together with the "Anyone" pool
     /// chip, since unowned chores stay everyone's business.
     func solo(_ ids: Set<String>) {
-        selected = selected == ids ? [] : ids
+        save(selected == ids ? [] : ids)
     }
 
     func clear() {
-        selected = []
+        save([])
+    }
+
+    private func save(_ next: Set<String>) {
+        selected = next
+        defaults.set(next.sorted().joined(separator: ","), forKey: key)
     }
 }

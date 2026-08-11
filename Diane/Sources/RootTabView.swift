@@ -17,8 +17,9 @@ struct RootTabView: View {
     /// and sessions are never fully released (review M9).
     @State private var sse = SSEClient()
     @State private var layout: TabLayoutStore
-    /// One member filter for the whole app (owner 2026-08-06).
-    @State private var filter = MemberFilterStore()
+    /// One member filter for the whole app (owner 2026-08-06), persisted
+    /// on-device per member (owner 2026-08-10).
+    @State private var filter: MemberFilterStore
     /// Which tab is showing — the ITEM, not its index: reordering the bar
     /// must never teleport the selection. DEBUG builds accept `-uiTab
     /// <0…4>` at launch so screenshots can reach any page without a human
@@ -49,6 +50,7 @@ struct RootTabView: View {
     init(context: SignedInContext) {
         self.context = context
         _layout = State(initialValue: TabLayoutStore(memberID: context.session.memberID))
+        _filter = State(initialValue: MemberFilterStore(memberID: context.session.memberID))
     }
 
     /// Re-tapping the active tab pops its stack — that's how you leave a
@@ -152,7 +154,7 @@ struct RootTabView: View {
     private func tabContent(_ item: TabItem, bar: [TabItem]) -> some View {
         switch item {
         case .today:
-            FamilyDayView(context: context)
+            TodayView(context: context)
         case .home:
             HomeView(
                 context: context,
