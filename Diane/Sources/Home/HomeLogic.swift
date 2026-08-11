@@ -3,13 +3,12 @@ import Foundation
 
 /// The Home tiles' pulse (owner 2026-08-10, rev 5 of the design doc): ONE
 /// count line per module tile — just numbers, no named things. Counts are
-/// FILTER-AWARE: computed over the app-wide member filter's effective set,
-/// so a tile always describes what its door opens onto (the one-filter
-/// rule). Rewards is the exception — "waiting" is a to-do for the viewing
-/// parent, never filtered. Lines are recomputed from a cached snapshot, so
-/// window and late boundaries ride the household clock's existing minute
-/// tick — no new timers, no refetching on the clock. Nonisolated on
-/// purpose: Views inherit @MainActor, logic must not.
+/// FAMILY-WIDE (owner verdict 2026-08-10): the tile is the household's
+/// pulse, whatever the member filter says — member detail lives one tap
+/// away on the pages built for it. Lines are recomputed from a cached
+/// snapshot, so window and late boundaries ride the household clock's
+/// existing minute tick — no new timers, no refetching on the clock.
+/// Nonisolated on purpose: Views inherit @MainActor, logic must not.
 enum HomeLogic {
     /// Everything one pulse needs, fetched once and recomputed cheaply.
     struct Snapshot: Equatable {
@@ -18,7 +17,6 @@ enum HomeLogic {
         var board: [Components.Schemas.RoutineBoardEntry] = []
         /// Redemptions awaiting a parent (the fetch is already status-scoped).
         var waiting = 0
-        var memberIds: [String] = []
     }
 
     /// One tile's line: the emphasised count ("3 open") and, on Chores, the
@@ -54,47 +52,35 @@ enum HomeLogic {
         _ snapshot: Snapshot,
         today: String,
         minute: String,
-        timeZone: TimeZone,
-        selected: Set<String>
+        timeZone: TimeZone
     ) -> Pulse {
         Pulse(
-            calendar: calendarLine(
-                events: snapshot.events, today: today, timeZone: timeZone, selected: selected
-            ),
-            chores: choresLine(
-                chores: snapshot.chores, today: today, minute: minute, selected: selected
-            ),
-            routines: routinesLine(board: snapshot.board, minute: minute, selected: selected),
+            calendar: calendarLine(events: snapshot.events, today: today, timeZone: timeZone),
+            chores: choresLine(chores: snapshot.chores, today: today, minute: minute),
+            routines: routinesLine(board: snapshot.board, minute: minute),
             rewards: rewardsLine(waiting: snapshot.waiting)
         )
     }
 
-    /// "4 today" — events on the household-local today. Whole-family events
-    /// (no member list) always count, like on every filtered page.
+    /// "4 today" — every event on the household-local today.
     static func calendarLine(
         events: [DayLogic.Event],
         today: String,
-        timeZone: TimeZone,
-        selected: Set<String>
+        timeZone: TimeZone
     ) -> Line? {
-        let count = events.count {
-            DayLogic.onDay($0, date: today, timeZone: timeZone)
-                && TodayLogic.visible($0, selected: selected)
-        }
+        let count = events.count { DayLogic.onDay($0, date: today, timeZone: timeZone) }
         return count > 0 ? Line(count: "\(count) today") : nil
     }
 
     /// "3 open · 1 late" — actionable chore ROWS, folded exactly as the
-    /// Chores page lists them (a shared chore is one row; pool rows count
-    /// for everyone). Late is the day pages' display twin, so the dot moves
-    /// at the same minute the rows do.
+    /// Chores page lists them (a shared chore is one row). Late is the day
+    /// pages' display twin, so the dot moves at the same minute the rows do.
     static func choresLine(
         chores: [DayLogic.Chore],
         today: String,
-        minute: String,
-        selected: Set<String>
+        minute: String
     ) -> Line? {
-        let rows = ChoresPageLogic.rows(chores).filter { TodayLogic.visible($0, selected: selected) }
+        let rows = ChoresPageLogic.rows(chores)
         let open = rows.count { row in row.occurrences.contains { $0.status == .open } }
         guard open > 0 else { return nil }
         let late = rows.count { row in
@@ -104,16 +90,14 @@ enum HomeLogic {
     }
 
     /// "3 left" — open tasks on board entries whose window is RUNNING at
-    /// `minute` (start inclusive, end exclusive). Outside every window, or
-    /// with nothing left, the door stays quiet.
+    /// `minute` (start inclusive, end exclusive), summed across the family.
+    /// Outside every window, or with nothing left, the door stays quiet.
     static func routinesLine(
         board: [Components.Schemas.RoutineBoardEntry],
-        minute: String,
-        selected: Set<String>
+        minute: String
     ) -> Line? {
         guard let now = TimeLogic.minutes(minute) else { return nil }
         let left = board
-            .filter { selected.contains($0.memberId) }
             .filter { entry in
                 guard let start = TimeLogic.minutes(entry.windowStart),
                       let end = TimeLogic.minutes(entry.windowEnd)
@@ -124,8 +108,7 @@ enum HomeLogic {
         return left > 0 ? Line(count: "\(left) left") : nil
     }
 
-    /// "1 waiting" — redemptions awaiting a parent, household-wide by
-    /// design: hiding a kid's pending reward would only delay it.
+    /// "1 waiting" — redemptions awaiting a parent, household-wide.
     static func rewardsLine(waiting: Int) -> Line? {
         waiting > 0 ? Line(count: "\(waiting) waiting") : nil
     }

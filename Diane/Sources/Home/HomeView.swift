@@ -24,9 +24,10 @@ import UniformTypeIdentifiers
 ///
 /// The pulse (owner 2026-08-10, rev 5): each live tile carries ONE count
 /// line — just numbers — plus a red corner dot when Chores holds something
-/// late. Counts follow the app-wide member filter (Rewards excepted); a
-/// tile with nothing to count is a quiet door, and a failed fetch keeps
-/// the last pulse — a launcher never wears error chrome.
+/// late. Counts are FAMILY-WIDE, untouched by the member filter (owner
+/// verdict 2026-08-10); a tile with nothing to count is a quiet door, and
+/// a failed fetch keeps the last pulse — a launcher never wears error
+/// chrome.
 struct HomeView: View {
     let context: SignedInContext
     /// Owned by RootTabView so re-tapping the Home tab can pop to the grid.
@@ -37,7 +38,6 @@ struct HomeView: View {
 
     @Environment(HouseholdClock.self) private var clock
     @Environment(TabLayoutStore.self) private var layout
-    @Environment(MemberFilterStore.self) private var filter
     @Environment(SyncSignals.self) private var signals
     @Environment(AppState.self) private var appState
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -61,8 +61,8 @@ struct HomeView: View {
             : [GridItem(.adaptive(minimum: 150), spacing: 14)]
     }
 
-    /// Refetch on any server change or day roll; minute and filter changes
-    /// only RECOMPUTE lines from the cached snapshot (no new timers).
+    /// Refetch on any server change or day roll; minute changes only
+    /// RECOMPUTE lines from the cached snapshot (no new timers).
     private var pulseKey: String {
         "\(signals.version(of: Set(DianeTopic.allCases)))|\(clock.today)"
     }
@@ -74,8 +74,7 @@ struct HomeView: View {
             snapshot,
             today: clock.today,
             minute: clock.minute,
-            timeZone: clock.timeZone,
-            selected: filter.effective(all: snapshot.memberIds)
+            timeZone: clock.timeZone
         )
         NavigationStack(path: $path) {
             VStack(spacing: 0) {
@@ -272,16 +271,12 @@ struct HomeView: View {
             async let waitingCall = context.client.api.listRewardRedemptions(
                 .init(query: .init(status: .redeemed, limit: RewardsLogic.waitingLimit))
             )
-            async let membersCall = context.client.api.listMembers(.init())
 
             var next = HomeLogic.Snapshot()
-            switch try await membersCall {
-            case .ok(let ok): next.memberIds = try ok.body.json.members.map(\.id)
+            switch try await eventsCall {
+            case .ok(let ok): next.events = try ok.body.json.events
             case .unauthorized: appState.handleUnauthorized(); return
-            default: return
-            }
-            if case .ok(let ok) = try await eventsCall {
-                next.events = try ok.body.json.events
+            default: break
             }
             if case .ok(let ok) = try await choresCall {
                 next.chores = try ok.body.json.occurrences

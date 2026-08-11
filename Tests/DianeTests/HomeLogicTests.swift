@@ -3,8 +3,9 @@ import Foundation
 import Testing
 @testable import Diane
 
-// The Home tiles' pulse: one count line per module, filter-aware, quiet
-// doors when there is nothing to count (design doc rev 5, 2026-08-10).
+// The Home tiles' pulse: one FAMILY-WIDE count line per module (owner
+// verdict 2026-08-10 — the member filter never touches Home), quiet doors
+// when there is nothing to count (design doc rev 5).
 @Suite struct HomeLogicTests {
     private let utc = TimeZone(identifier: "UTC")!
 
@@ -57,9 +58,9 @@ import Testing
         )
     }
 
-    // MARK: Calendar — "N today", filter-aware, family events always count
+    // MARK: Calendar — "N today", every member's events
 
-    @Test func calendarCountsOnlyTodayThroughTheFilter() {
+    @Test func calendarCountsAllOfTodayFamilyWide() {
         let events = [
             event(id: "family", start: "2026-08-10T09:00"),                 // no members = family
             event(id: "mine", start: "2026-08-10T14:00", memberIds: ["a"]),
@@ -67,22 +68,14 @@ import Testing
             event(id: "tomorrow", start: "2026-08-11T09:00"),
             event(id: "span", allDay: true, startDate: "2026-08-09", endDate: "2026-08-12"),
         ]
-        let everyone = HomeLogic.calendarLine(
-            events: events, today: "2026-08-10", timeZone: utc, selected: ["a", "b"]
-        )
-        #expect(everyone == HomeLogic.Line(count: "4 today"))
-        // Filtered to a: b's event drops, family rows and the spanning
-        // all-day stay.
-        let justA = HomeLogic.calendarLine(
-            events: events, today: "2026-08-10", timeZone: utc, selected: ["a"]
-        )
-        #expect(justA == HomeLogic.Line(count: "3 today"))
+        let line = HomeLogic.calendarLine(events: events, today: "2026-08-10", timeZone: utc)
+        #expect(line == HomeLogic.Line(count: "4 today"))
     }
 
     @Test func calendarWithNothingTodayIsAQuietDoor() {
         let line = HomeLogic.calendarLine(
             events: [event(id: "tomorrow", start: "2026-08-11T09:00")],
-            today: "2026-08-10", timeZone: utc, selected: ["a"]
+            today: "2026-08-10", timeZone: utc
         )
         #expect(line == nil)
     }
@@ -90,15 +83,16 @@ import Testing
     // MARK: Chores — rows fold like the Chores page; dot mirrors "late"
 
     @Test func choresCountRowsNotOccurrences() {
-        // A shared chore (two occurrences, same chore + date) is ONE row.
+        // A shared chore (two occurrences, same chore + date) is ONE row;
+        // owned, pool, and every member's rows all count.
         let line = HomeLogic.choresLine(
             chores: [
                 chore(id: "s1", choreId: "shared", owner: "a"),
                 chore(id: "s2", choreId: "shared", owner: "b"),
-                chore(id: "solo", owner: "a"),
+                chore(id: "pool", owner: nil),
                 chore(id: "done", owner: "a", status: .completed),
             ],
-            today: "2026-08-10", minute: "09:00", selected: ["a", "b"]
+            today: "2026-08-10", minute: "09:00"
         )
         #expect(line == HomeLogic.Line(count: "2 open"))
     }
@@ -109,9 +103,9 @@ import Testing
                 chore(id: "flagged", late: true),
                 // Timed today, past due + grace at 18:20 — late by the twin.
                 chore(id: "timed", dueTime: "18:00"),
-                chore(id: "fine"),
+                chore(id: "fine", owner: "b"),
             ],
-            today: "2026-08-10", minute: "18:20", selected: ["a"]
+            today: "2026-08-10", minute: "18:20"
         )
         #expect(line == HomeLogic.Line(count: "3 open", late: "2 late"))
         var pulse = HomeLogic.Pulse()
@@ -120,18 +114,10 @@ import Testing
         #expect(!pulse.showsDot(for: .calendar))
     }
 
-    @Test func choresPoolRowsCountForEveryoneAndFilteredOwnersDrop() {
-        let line = HomeLogic.choresLine(
-            chores: [chore(id: "pool", owner: nil), chore(id: "hers", owner: "b")],
-            today: "2026-08-10", minute: "09:00", selected: ["a"]
-        )
-        #expect(line == HomeLogic.Line(count: "1 open"))
-    }
-
     @Test func choresAllDoneIsAQuietDoor() {
         let line = HomeLogic.choresLine(
             chores: [chore(id: "done", status: .completed)],
-            today: "2026-08-10", minute: "09:00", selected: ["a"]
+            today: "2026-08-10", minute: "09:00"
         )
         #expect(line == nil)
     }
@@ -144,23 +130,20 @@ import Testing
             entry(member: "b", open: 1),
             entry(member: "a", windowStart: "18:00", windowEnd: "21:00", open: 5),
         ]
-        let line = HomeLogic.routinesLine(board: board, minute: "09:30", selected: ["a", "b"])
+        let line = HomeLogic.routinesLine(board: board, minute: "09:30")
         #expect(line == HomeLogic.Line(count: "3 left"))
         // The evening window isn't running at 09:30; at 18:00 it is (start
         // inclusive) and the morning ones are over (end exclusive covers
         // 12:00 exactly).
-        let evening = HomeLogic.routinesLine(board: board, minute: "18:00", selected: ["a", "b"])
+        let evening = HomeLogic.routinesLine(board: board, minute: "18:00")
         #expect(evening == HomeLogic.Line(count: "5 left"))
-        let noon = HomeLogic.routinesLine(board: board, minute: "12:00", selected: ["a", "b"])
+        let noon = HomeLogic.routinesLine(board: board, minute: "12:00")
         #expect(noon == nil)
     }
 
-    @Test func routinesFollowTheFilterAndGoQuietWhenDone() {
-        let board = [entry(member: "a", open: 2), entry(member: "b", open: 1)]
-        let justB = HomeLogic.routinesLine(board: board, minute: "09:30", selected: ["b"])
-        #expect(justB == HomeLogic.Line(count: "1 left"))
+    @Test func routinesAllDoneIsAQuietDoor() {
         let done = HomeLogic.routinesLine(
-            board: [entry(member: "a", open: 0, done: 3)], minute: "09:30", selected: ["a"]
+            board: [entry(member: "a", open: 0, done: 3)], minute: "09:30"
         )
         #expect(done == nil)
     }
@@ -180,10 +163,7 @@ import Testing
         snapshot.chores = [chore(id: "open")]
         snapshot.board = [entry(member: "a", open: 1)]
         snapshot.waiting = 1
-        snapshot.memberIds = ["a"]
-        let pulse = HomeLogic.pulse(
-            snapshot, today: "2026-08-10", minute: "09:00", timeZone: utc, selected: ["a"]
-        )
+        let pulse = HomeLogic.pulse(snapshot, today: "2026-08-10", minute: "09:00", timeZone: utc)
         #expect(pulse.line(for: .calendar) == HomeLogic.Line(count: "1 today"))
         #expect(pulse.line(for: .chores) == HomeLogic.Line(count: "1 open"))
         #expect(pulse.line(for: .routines) == HomeLogic.Line(count: "1 left"))
