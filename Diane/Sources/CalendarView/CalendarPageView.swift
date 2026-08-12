@@ -64,10 +64,13 @@ struct CalendarPageView: View {
         }
     }
 
+    /// The Settings "Week starts" pref (M9e-8): system, or Sunday/Monday.
+    @AppStorage("weekStart") private var weekStart = "system"
+
     private var logic: CalendarPageLogic {
-        // System week start out of the box (Settings override lands M9e-8).
         var calendar = Foundation.Calendar.current
         calendar.timeZone = clock.timeZone
+        calendar.firstWeekday = DisplayPrefs.firstWeekday(weekStart)
         return CalendarPageLogic(calendar: calendar)
     }
 

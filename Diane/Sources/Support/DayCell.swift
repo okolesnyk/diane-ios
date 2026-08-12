@@ -65,9 +65,15 @@ struct DayStrip: View {
     let dots: (String) -> DayLogic.DayDots
     let onSelect: (String) -> Void
 
+    /// The Settings "Week starts" pref (M9e-8) — the strip aligns with the
+    /// Calendar page's grid.
+    @AppStorage("weekStart") private var weekStart = "system"
+
     var body: some View {
         HStack(spacing: 4) {
-            ForEach(DayLogic.weekDays(containing: day)) { stripDay in
+            ForEach(DayLogic.weekDays(
+                containing: day, firstWeekday: DisplayPrefs.firstWeekday(weekStart)
+            )) { stripDay in
                 let d = dots(stripDay.date)
                 DayCell(
                     date: stripDay.date,
@@ -93,7 +99,8 @@ struct DayStrip: View {
                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
                 onSelect(DayLogic.pagedStripTarget(
                     from: day,
-                    forward: value.translation.width < 0
+                    forward: value.translation.width < 0,
+                    firstWeekday: DisplayPrefs.firstWeekday(weekStart)
                 ))
             }
         )

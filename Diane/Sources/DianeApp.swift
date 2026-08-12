@@ -18,10 +18,38 @@ struct DianeApp: App {
     }
 }
 
+/// Device-local display prefs (owner ruling 2026-08-05: personal display
+/// lives on the device; the API stays client-agnostic).
+enum DisplayPrefs {
+    /// "system" | "dark" | "light" — applied as preferredColorScheme.
+    static func scheme(_ raw: String) -> ColorScheme? {
+        switch raw {
+        case "dark": .dark
+        case "light": .light
+        default: nil
+        }
+    }
+
+    /// "system" | "sunday" | "monday" — resolved to Calendar's 1…7.
+    static func firstWeekday(_ raw: String) -> Int {
+        switch raw {
+        case "sunday": 1
+        case "monday": 2
+        default: Foundation.Calendar.current.firstWeekday
+        }
+    }
+}
+
 struct RootView: View {
     @Environment(AppState.self) private var appState
+    /// Appearance is per member per device (owner 2026-08-05).
+    @AppStorage("appearance") private var appearance = "system"
 
     var body: some View {
+        phased.preferredColorScheme(DisplayPrefs.scheme(appearance))
+    }
+
+    @ViewBuilder private var phased: some View {
         switch appState.phase {
         case .launching:
             ProgressView()
