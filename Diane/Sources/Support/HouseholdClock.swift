@@ -67,7 +67,8 @@ final class HouseholdClock {
         let switchboard = ModuleSwitchboard(
             chores: household.modules.chores,
             routines: household.modules.routines,
-            rewards: household.modules.rewards
+            rewards: household.modules.rewards,
+            lists: household.modules.lists
         )
         if switchboard != modules { modules = switchboard }
         guard let tz = TimeZone(identifier: household.tz) else { return }

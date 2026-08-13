@@ -480,10 +480,13 @@ components:
           type: boolean
         rewards:
           type: boolean
+        lists:
+          type: boolean
       required:
         - chores
         - routines
         - rewards
+        - lists
     HouseholdUpdate:
       type: object
       properties:
@@ -522,6 +525,8 @@ components:
             routines:
               type: boolean
             rewards:
+              type: boolean
+            lists:
               type: boolean
         reminderLeadMinutes:
           type: integer
@@ -2189,6 +2194,282 @@ components:
           type: integer
       required:
         - balance
+    ListList:
+      type: object
+      properties:
+        lists:
+          type: array
+          items:
+            $ref: "#/components/schemas/List"
+      required:
+        - lists
+    List:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          $ref: "#/components/schemas/ListType"
+        name:
+          type: string
+        sortOrder:
+          type: integer
+        itemCount:
+          type: integer
+        checkedCount:
+          type: integer
+        createdAt:
+          type: string
+      required:
+        - id
+        - type
+        - name
+        - sortOrder
+        - itemCount
+        - checkedCount
+        - createdAt
+    ListType:
+      type: string
+      enum:
+        - grocery
+        - checklist
+        - plain
+    ListCreate:
+      type: object
+      properties:
+        type:
+          $ref: "#/components/schemas/ListType"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 10000
+      required:
+        - type
+        - name
+    ListDetail:
+      type: object
+      properties:
+        list:
+          type: object
+          properties:
+            id:
+              type: string
+            type:
+              $ref: "#/components/schemas/ListType"
+            name:
+              type: string
+            sortOrder:
+              type: integer
+            itemCount:
+              type: integer
+            checkedCount:
+              type: integer
+            createdAt:
+              type: string
+          required:
+            - id
+            - type
+            - name
+            - sortOrder
+            - itemCount
+            - checkedCount
+            - createdAt
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ListItem"
+      required:
+        - list
+        - items
+    ListItem:
+      type: object
+      properties:
+        id:
+          type: string
+        listId:
+          type: string
+        name:
+          type: string
+        amount:
+          type: string
+        categoryId:
+          type: string
+          nullable: true
+        checked:
+          type: boolean
+        sortOrder:
+          type: integer
+        createdAt:
+          type: string
+      required:
+        - id
+        - listId
+        - name
+        - amount
+        - categoryId
+        - checked
+        - sortOrder
+        - createdAt
+    ListUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        sortOrder:
+          type: integer
+          minimum: 0
+          maximum: 10000
+    ListItemCreate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        amount:
+          type: string
+          maxLength: 40
+        categoryId:
+          type: string
+          nullable: true
+          maxLength: 64
+      required:
+        - name
+    ListItemUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        amount:
+          type: string
+          maxLength: 40
+        categoryId:
+          type: string
+          nullable: true
+          maxLength: 64
+        checked:
+          type: boolean
+    ClearCheckedResult:
+      type: object
+      properties:
+        removed:
+          type: integer
+      required:
+        - removed
+    ListItemsOrder:
+      type: object
+      properties:
+        itemIds:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 500
+      required:
+        - itemIds
+    GroceryCategoryList:
+      type: object
+      properties:
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/GroceryCategory"
+      required:
+        - categories
+    GroceryCategory:
+      type: object
+      properties:
+        id:
+          type: string
+        key:
+          type: string
+          nullable: true
+        name:
+          type: string
+        color:
+          type: string
+        sortOrder:
+          type: integer
+      required:
+        - id
+        - key
+        - name
+        - color
+        - sortOrder
+    GroceryCategoryCreate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        color:
+          type: string
+          pattern: ^#[0-9a-fA-F]{6}$
+      required:
+        - name
+        - color
+    GroceryCategoryUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 40
+        color:
+          type: string
+          pattern: ^#[0-9a-fA-F]{6}$
+    GroceryLibraryList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GroceryLibraryItem"
+      required:
+        - items
+    GroceryLibraryItem:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        altName:
+          type: string
+        categoryId:
+          type: string
+          nullable: true
+        lastAmount:
+          type: string
+      required:
+        - id
+        - name
+        - altName
+        - categoryId
+        - lastAmount
+    GroceryLibraryUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        altName:
+          type: string
+          maxLength: 120
+        categoryId:
+          type: string
+          nullable: true
+          maxLength: 64
     StarBalanceList:
       type: object
       properties:
@@ -4797,6 +5078,540 @@ paths:
                 $ref: "#/components/schemas/Error"
         "404":
           description: Redemption not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/lists:
+    get:
+      operationId: listLists
+      summary: Every list with its badge counts
+      responses:
+        "200":
+          description: Lists in display order (seeds the grocery catalog on first call)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createList
+      summary: Create a list (grocery, checklist, or plain)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListCreate"
+      responses:
+        "201":
+          description: The created list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/List"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/lists/{id}:
+    get:
+      operationId: getList
+      summary: A list with all its items
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: The list and its items in sort order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListDetail"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: List not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    patch:
+      operationId: updateList
+      summary: Rename or reorder a list
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListUpdate"
+      responses:
+        "200":
+          description: The updated list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/List"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: List not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteList
+      summary: Delete a list and its items
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "204":
+          description: List deleted (items cascade; the library is untouched)
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: List not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/lists/{id}/items:
+    post:
+      operationId: addListItem
+      summary: Add an item (one step — grocery lists resolve the category and learn)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListItemCreate"
+      responses:
+        "201":
+          description: "The created item (grocery: category = explicit > library match >
+            Other)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListItem"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: List not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: unknown_category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/lists/{id}/items/{itemId}:
+    patch:
+      operationId: updateListItem
+      summary: Edit an item — check/uncheck, amount, name, or refile (teaches the
+        library)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+        - schema:
+            type: string
+          required: true
+          name: itemId
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListItemUpdate"
+      responses:
+        "200":
+          description: The updated item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListItem"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Item not found in this list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: unknown_category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteListItem
+      summary: Remove an item (slide-to-remove; the library keeps it)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+        - schema:
+            type: string
+          required: true
+          name: itemId
+          in: path
+      responses:
+        "204":
+          description: Item removed
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Item not found in this list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/lists/{id}/clear-checked:
+    post:
+      operationId: clearCheckedItems
+      summary: "Checkout: remove every checked row (the library remembers them)"
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "200":
+          description: How many rows left the list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClearCheckedResult"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: List not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/lists/{id}/reset:
+    post:
+      operationId: resetList
+      summary: Uncheck every row — the checklist is ready for the next trip
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "204":
+          description: All rows unchecked; the items stay
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: List not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/lists/{id}/items-order:
+    put:
+      operationId: orderListItems
+      summary: "Manual sort (hold-and-drag): named items take positions 0..n-1"
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListItemsOrder"
+      responses:
+        "204":
+          description: Order applied (rows added concurrently keep their place at the end)
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: List not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: unknown_item — an id does not belong to this list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/grocery/categories:
+    get:
+      operationId: listGroceryCategories
+      summary: The household grocery categories (seeded + custom)
+      responses:
+        "200":
+          description: Categories in display order (Other sorts last)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroceryCategoryList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: createGroceryCategory
+      summary: Create a custom category (name + color)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GroceryCategoryCreate"
+      responses:
+        "201":
+          description: The created category (sorts before Other)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroceryCategory"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/grocery/categories/{id}:
+    patch:
+      operationId: updateGroceryCategory
+      summary: Rename or recolor a category (seeded ones too)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GroceryCategoryUpdate"
+      responses:
+        "200":
+          description: The updated category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroceryCategory"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Category not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteGroceryCategory
+      summary: Delete a CUSTOM category — its items and library entries move to Other
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "204":
+          description: Category deleted; everything filed under it is now Other
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Category not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: seeded_category — the seeded ten and Other are permanent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/grocery/library:
+    get:
+      operationId: listGroceryLibrary
+      summary: The household grocery library (bilingual, learn-on-add)
+      parameters:
+        - schema:
+            type: string
+            maxLength: 120
+          required: false
+          name: q
+          in: query
+      responses:
+        "200":
+          description: Library entries, name asc; ?q= matches both languages (max 500)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroceryLibraryList"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Malformed query
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/grocery/library/{id}:
+    patch:
+      operationId: updateGroceryLibraryItem
+      summary: Edit a library entry (either language, category)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GroceryLibraryUpdate"
+      responses:
+        "200":
+          description: The updated entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroceryLibraryItem"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Entry not found in this household
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: unknown_category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      operationId: deleteGroceryLibraryItem
+      summary: Delete a library entry (lists that already have it keep their rows)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      responses:
+        "204":
+          description: Entry deleted
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Entry not found in this household
           content:
             application/json:
               schema:

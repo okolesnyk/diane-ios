@@ -7,12 +7,13 @@ struct ModuleSwitchboard: Equatable {
     var chores = true
     var routines = true
     var rewards = true
+    var lists = true
 }
 
 /// The launchable modules. Calendar is the spine and always on; the rest
 /// follow the household switchboard.
 enum DianeModule: String, CaseIterable, Identifiable, Codable {
-    case calendar, chores, routines, rewards
+    case calendar, chores, routines, rewards, lists
 
     var id: String { rawValue }
 
@@ -22,6 +23,7 @@ enum DianeModule: String, CaseIterable, Identifiable, Codable {
         case .chores: "Chores"
         case .routines: "Routines"
         case .rewards: "Rewards"
+        case .lists: "Lists"
         }
     }
 
@@ -31,6 +33,7 @@ enum DianeModule: String, CaseIterable, Identifiable, Codable {
         case .chores: "checkmark.circle"
         case .routines: "repeat"
         case .rewards: "star"
+        case .lists: "checklist"
         }
     }
 
@@ -40,6 +43,7 @@ enum DianeModule: String, CaseIterable, Identifiable, Codable {
         case .chores: modules.chores
         case .routines: modules.routines
         case .rewards: modules.rewards
+        case .lists: modules.lists
         }
     }
 }
@@ -47,13 +51,12 @@ enum DianeModule: String, CaseIterable, Identifiable, Codable {
 /// Tiles for modules that exist in the design but not yet in the product —
 /// shown grayed in Apps so the family knows where the future lands.
 enum FutureModule: String, CaseIterable, Identifiable {
-    case lists, meals, photos, assistant
+    case meals, photos, assistant
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .lists: "Lists"
         case .meals: "Meals"
         case .photos: "Photos"
         case .assistant: "Assistant"
@@ -62,7 +65,6 @@ enum FutureModule: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .lists: "checklist"
         case .meals: "fork.knife"
         case .photos: "photo.on.rectangle"
         case .assistant: "sparkles"

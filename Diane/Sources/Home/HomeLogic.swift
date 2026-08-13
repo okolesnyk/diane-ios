@@ -17,6 +17,7 @@ enum HomeLogic {
         var board: [Components.Schemas.RoutineBoardEntry] = []
         /// Redemptions awaiting a parent (the fetch is already status-scoped).
         var waiting = 0
+        var lists: [Components.Schemas.List] = []
     }
 
     /// One tile's line: the emphasised count ("3 open") and, on Chores, the
@@ -31,6 +32,7 @@ enum HomeLogic {
         var chores: Line?
         var routines: Line?
         var rewards: Line?
+        var lists: Line?
 
         func line(for module: DianeModule) -> Line? {
             switch module {
@@ -38,6 +40,7 @@ enum HomeLogic {
             case .chores: chores
             case .routines: routines
             case .rewards: rewards
+            case .lists: lists
             }
         }
 
@@ -58,7 +61,8 @@ enum HomeLogic {
             calendar: calendarLine(events: snapshot.events, today: today, timeZone: timeZone),
             chores: choresLine(chores: snapshot.chores, today: today, minute: minute),
             routines: routinesLine(board: snapshot.board),
-            rewards: rewardsLine(waiting: snapshot.waiting)
+            rewards: rewardsLine(waiting: snapshot.waiting),
+            lists: listsLine(lists: snapshot.lists)
         )
     }
 
@@ -101,5 +105,17 @@ enum HomeLogic {
     /// "1 waiting" — redemptions awaiting a parent, household-wide.
     static func rewardsLine(waiting: Int) -> Line? {
         waiting > 0 ? Line(count: "\(waiting) waiting") : nil
+    }
+
+    /// "Costco · 14 to buy" — the busiest grocery list (design doc: the tile
+    /// badge is the shopping pulse). Nothing left to buy anywhere → quiet.
+    static func listsLine(lists: [Components.Schemas.List]) -> Line? {
+        let busiest = lists
+            .filter { $0._type == .grocery }
+            .map { (name: $0.name, toBuy: $0.itemCount - $0.checkedCount) }
+            .filter { $0.toBuy > 0 }
+            .max { $0.toBuy < $1.toBuy }
+        guard let busiest else { return nil }
+        return Line(count: "\(busiest.name) · \(busiest.toBuy) to buy")
     }
 }

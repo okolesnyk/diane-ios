@@ -682,6 +682,7 @@ struct ModulesView: View {
     @State private var chores = true
     @State private var routines = true
     @State private var rewards = true
+    @State private var lists = true
     @State private var loaded = false
     @State private var errorMessage: String?
 
@@ -694,6 +695,7 @@ struct ModulesView: View {
                 Toggle("Chores", isOn: binding($chores, key: "chores"))
                 Toggle("Routines", isOn: binding($routines, key: "routines"))
                 Toggle("Rewards", isOn: binding($rewards, key: "rewards"))
+                Toggle("Lists", isOn: binding($lists, key: "lists"))
             } header: {
                 Text("On for this household").font(.caption.weight(.semibold))
             }
@@ -718,6 +720,7 @@ struct ModulesView: View {
             chores = clock.modules.chores
             routines = clock.modules.routines
             rewards = clock.modules.rewards
+            lists = clock.modules.lists
         }
         .alert(errorMessage ?? "", isPresented: .init(
             get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
@@ -743,7 +746,7 @@ struct ModulesView: View {
     private func patch() async -> Bool {
         do {
             let body = Components.Schemas.HouseholdUpdate(
-                modules: .init(chores: chores, routines: routines, rewards: rewards)
+                modules: .init(chores: chores, routines: routines, rewards: rewards, lists: lists)
             )
             switch try await context.client.api.updateHousehold(.init(body: .json(body))) {
             case .ok: return true

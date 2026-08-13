@@ -29,6 +29,7 @@ public enum DianeTopic: String, CaseIterable, Sendable {
     case members = "members-changed"
     case stars = "stars-changed"
     case rewards = "rewards-changed"
+    case lists = "lists-changed"
     case chores = "chores-changed"
     case routines = "routines-changed"
     case settings = "settings-changed"

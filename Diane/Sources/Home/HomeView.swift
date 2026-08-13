@@ -271,6 +271,7 @@ struct HomeView: View {
             async let waitingCall = context.client.api.listRewardRedemptions(
                 .init(query: .init(status: .redeemed, limit: RewardsLogic.waitingLimit))
             )
+            async let listsCall = context.client.api.listLists(.init())
 
             var next = HomeLogic.Snapshot()
             switch try await eventsCall {
@@ -286,6 +287,9 @@ struct HomeView: View {
             }
             if case .ok(let ok) = try await waitingCall {
                 next.waiting = try ok.body.json.redemptions.count
+            }
+            if case .ok(let ok) = try await listsCall {
+                next.lists = try ok.body.json.lists
             }
             snapshot = next
         } catch {

@@ -7,13 +7,13 @@ import Testing
 // client logic (owner rule 2026-08-05; up to three slots 2026-08-10).
 @Suite struct NavigationLogicTests {
     @Test func calendarIsAlwaysOn() {
-        let allOff = ModuleSwitchboard(chores: false, routines: false, rewards: false)
+        let allOff = ModuleSwitchboard(chores: false, routines: false, rewards: false, lists: false)
         #expect(DianeModule.calendar.isOn(allOff))
         #expect(NavigationLogic.enabledModules(allOff) == [.calendar])
     }
 
     @Test func enabledModulesFollowTheSwitchboard() {
-        let some = ModuleSwitchboard(chores: true, routines: false, rewards: true)
+        let some = ModuleSwitchboard(chores: true, routines: false, rewards: true, lists: false)
         #expect(NavigationLogic.enabledModules(some) == [.calendar, .chores, .rewards])
         #expect(NavigationLogic.enabledModules(ModuleSwitchboard()) == DianeModule.allCases)
     }
@@ -78,12 +78,12 @@ import Testing
         let all = DianeModule.allCases
         #expect(store.orderedTiles(enabled: all) == all) // canonical default
         store.moveTile(.rewards, to: .calendar, enabled: all)
-        #expect(store.orderedTiles(enabled: all) == [.rewards, .calendar, .chores, .routines])
+        #expect(store.orderedTiles(enabled: all) == [.rewards, .calendar, .chores, .routines, .lists])
         // A module the switchboard hides drops out without losing its seat.
         #expect(store.orderedTiles(enabled: [.calendar, .chores, .rewards]) == [.rewards, .calendar, .chores])
         // A fresh store reads the persisted order; unknown modules append.
         #expect(TabLayoutStore(memberID: "m-alex", defaults: defaults)
-            .orderedTiles(enabled: all) == [.rewards, .calendar, .chores, .routines])
+            .orderedTiles(enabled: all) == [.rewards, .calendar, .chores, .routines, .lists])
     }
 
     @Test func dayTitleFormatsTheHouseholdDay() {

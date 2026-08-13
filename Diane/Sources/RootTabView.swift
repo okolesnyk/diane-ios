@@ -257,6 +257,7 @@ struct ModuleScreen: View {
         case .chores: ChoresPageView(context: context, open: open)
         case .routines: RoutinesView(context: context)
         case .rewards: RewardsView(context: context)
+        case .lists: ListsView(context: context)
         }
     }
 }
