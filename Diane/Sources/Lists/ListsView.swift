@@ -13,16 +13,21 @@ struct ListsView: View {
     @State private var creating = false
     @State private var confirmingDelete: Components.Schemas.List?
 
+    private let rowInsets = EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+
     var body: some View {
         Group {
             switch lists {
             case .loading:
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .failed:
-                ContentUnavailableView(
-                    "Couldn't reach your home server",
-                    systemImage: "wifi.exclamationmark"
-                )
+            case .failed(let message):
+                ContentUnavailableView {
+                    Label("Can't reach the server", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(message)
+                } actions: {
+                    Button("Try again") { Task { await load() } }
+                }
             case .loaded(let rows):
                 listBody(rows)
             }
@@ -50,12 +55,24 @@ struct ListsView: View {
 
     private func listBody(_ rows: [Components.Schemas.List]) -> some View {
         List {
+            if rows.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "sparkles").font(.title2).foregroundStyle(.secondary)
+                    Text("No lists yet")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 110)
+                .listRowSeparator(.hidden)
+            }
             ForEach(rows, id: \.id) { list in
                 NavigationLink {
                     destination(list)
                 } label: {
                     row(list)
                 }
+                .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                .listRowInsets(rowInsets)
                 .swipeActions(edge: .trailing) {
                     Button("Delete", role: .destructive) { confirmingDelete = list }
                 }
@@ -64,14 +81,34 @@ struct ListsView: View {
             .onMove { source, destination in
                 Task { await move(rows, from: source, to: destination) }
             }
-            Button {
-                creating = true
-            } label: {
-                Label("New list", systemImage: "plus")
-                    .foregroundStyle(Color.accentColor)
-            }
+            addRow
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
+        .contentMargins(.top, 8, for: .scrollContent)
+        .fontDesign(.rounded)
+        .refreshable { await load() }
+    }
+
+    /// The ghost row every module uses for "make a new one".
+    private var addRow: some View {
+        Button { creating = true } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus")
+                Text("New list")
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(Color.accentColor)
+            .frame(maxWidth: .infinity, minHeight: 40)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                    .foregroundStyle(.tertiary)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(rowInsets)
+        .listRowSeparator(.hidden)
     }
 
     private func move(

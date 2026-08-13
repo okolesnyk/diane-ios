@@ -20,16 +20,21 @@ struct TodoListView: View {
     @State private var confirmingReset = false
     @FocusState private var addFocused: Bool
 
+    private let rowInsets = EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+
     var body: some View {
         Group {
             switch items {
             case .loading:
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .failed:
-                ContentUnavailableView(
-                    "Couldn't reach your home server",
-                    systemImage: "wifi.exclamationmark"
-                )
+            case .failed(let message):
+                ContentUnavailableView {
+                    Label("Can't reach the server", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(message)
+                } actions: {
+                    Button("Try again") { Task { await load() } }
+                }
             case .loaded(let rows):
                 listBody(rows)
             }
@@ -62,49 +67,73 @@ struct TodoListView: View {
         let done = rows.filter(\.checked).count
         return List {
             if isChecklist, !rows.isEmpty {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                            Text("\(done) of \(rows.count)").font(.title3.weight(.bold))
-                            Text("done").font(.caption).foregroundStyle(.secondary)
-                        }
-                        ProgressView(value: Double(done), total: Double(max(rows.count, 1)))
-                            .tint(.green)
-                    }
-                    .padding(.vertical, 4)
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Text("\(done) of \(rows.count)").font(.title3.weight(.bold))
+                    Text("done").font(.caption).foregroundStyle(.secondary)
+                    Spacer(minLength: 12)
+                    ProgressView(value: Double(done), total: Double(max(rows.count, 1)))
+                        .tint(.green)
+                        .frame(maxWidth: 140)
                 }
+                .listRowInsets(rowInsets)
+                .listRowSeparator(.hidden)
             }
-            Section {
-                TextField("Add an item", text: $draft)
-                    .focused($addFocused)
-                    .submitLabel(.done)
-                    .onSubmit { Task { await add() } }
+            TextField("Add an item", text: $draft)
+                .focused($addFocused)
+                .submitLabel(.done)
+                .onSubmit { Task { await add() } }
+                .padding(.horizontal, 12)
+                .frame(minHeight: 40)
+                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 12))
+                .listRowInsets(rowInsets)
+                .listRowSeparator(.hidden)
+            if ordered.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "sparkles").font(.title2).foregroundStyle(.secondary)
+                    Text("Nothing here yet")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 110)
+                .listRowSeparator(.hidden)
             }
-            Section {
-                ForEach(ordered, id: \.id) { item in
-                    row(item)
-                }
-                .onMove { source, destination in
-                    Task { await move(ordered, from: source, to: destination) }
-                }
+            ForEach(ordered, id: \.id) { item in
+                row(item)
+            }
+            .onMove { source, destination in
+                Task { await move(ordered, from: source, to: destination) }
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
+        .contentMargins(.top, 8, for: .scrollContent)
+        .fontDesign(.rounded)
+        .refreshable { await load() }
     }
 
+    /// The day pages' row anatomy: hierarchical circle in a 44pt frame, and
+    /// done = the whole row goes gray (owner 2026-08-08).
     private func row(_ item: Components.Schemas.ListItem) -> some View {
         Button {
             Task { await toggle(item) }
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 10) {
                 Image(systemName: item.checked ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22))
-                    .foregroundStyle(item.checked ? Color.green : Color(.tertiaryLabel))
+                    .font(.system(size: 26))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(item.checked ? Color.green : Color.secondary)
+                    .frame(width: 44, height: 44)
                 Text(item.name)
-                    .strikethrough(item.checked)
+                    .strikethrough(item.checked, color: .secondary)
                     .foregroundStyle(item.checked ? Color.secondary : Color.primary)
+                Spacer(minLength: 0)
             }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .grayscale(item.checked ? 1 : 0)
+        .opacity(item.checked ? 0.6 : 1)
+        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
         .swipeActions(edge: .trailing) {
             Button("Delete", role: .destructive) { Task { await delete(item) } }
         }

@@ -14,44 +14,68 @@ struct CategoriesView: View {
     @State private var creating = false
     @State private var editing: Components.Schemas.GroceryCategory?
 
+    private let rowInsets = EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16)
+
     var body: some View {
         Group {
             switch categories {
             case .loading:
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .failed:
-                ContentUnavailableView(
-                    "Couldn't reach your home server",
-                    systemImage: "wifi.exclamationmark"
-                )
+            case .failed(let message):
+                ContentUnavailableView {
+                    Label("Can't reach the server", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(message)
+                } actions: {
+                    Button("Try again") { Task { await load() } }
+                }
             case .loaded(let rows):
                 List {
-                    Button {
-                        creating = true
-                    } label: {
-                        Label("New category", systemImage: "plus")
-                            .foregroundStyle(Color.accentColor)
-                    }
-                    Section {
-                        ForEach(rows, id: \.id) { category in
-                            Button {
-                                editing = category
-                            } label: {
-                                HStack(spacing: 11) {
-                                    RoundedRectangle(cornerRadius: 4)
-                                        .fill(Color(hex: category.color))
-                                        .frame(width: 16, height: 16)
-                                    Text(category.name).foregroundStyle(.primary)
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.tertiary)
-                                }
+                    ForEach(rows, id: \.id) { category in
+                        Button {
+                            editing = category
+                        } label: {
+                            HStack(spacing: 11) {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color(hex: category.color))
+                                    .frame(width: 16, height: 16)
+                                Text(category.name).foregroundStyle(.primary)
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
                             }
+                            .frame(minHeight: 40)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                        .listRowInsets(rowInsets)
                     }
+                    // The ghost row every module uses for "make a new one".
+                    Button { creating = true } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "plus")
+                            Text("New category")
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Color.accentColor)
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                                .foregroundStyle(.tertiary)
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                    .listRowSeparator(.hidden)
                 }
-                .listStyle(.insetGrouped)
+                .listStyle(.plain)
+                .contentMargins(.top, 8, for: .scrollContent)
+                .fontDesign(.rounded)
+                .refreshable { await load() }
             }
         }
         .navigationTitle("Categories")

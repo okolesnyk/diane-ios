@@ -15,16 +15,22 @@ struct LibraryView: View {
     @State private var query = ""
     @State private var editing: Components.Schemas.GroceryLibraryItem?
 
+    private let rowInsets = EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16)
+    private let furnitureInsets = EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+
     var body: some View {
         Group {
             switch entries {
             case .loading:
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .failed:
-                ContentUnavailableView(
-                    "Couldn't reach your home server",
-                    systemImage: "wifi.exclamationmark"
-                )
+            case .failed(let message):
+                ContentUnavailableView {
+                    Label("Can't reach the server", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(message)
+                } actions: {
+                    Button("Try again") { Task { await load() } }
+                }
             case .loaded(let rows):
                 listBody(rows)
             }
@@ -52,9 +58,22 @@ struct LibraryView: View {
     private func listBody(_ rows: [Components.Schemas.GroceryLibraryItem]) -> some View {
         let groups = ListsLogic.libraryGroups(entries: rows, categories: categories, query: query)
         return List {
-            Section {
-                TextField("Search the library", text: $query)
-                    .autocorrectionDisabled()
+            TextField("Search the library", text: $query)
+                .autocorrectionDisabled()
+                .padding(.horizontal, 12)
+                .frame(minHeight: 40)
+                .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 12))
+                .listRowInsets(furnitureInsets)
+                .listRowSeparator(.hidden)
+            if groups.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "sparkles").font(.title2).foregroundStyle(.secondary)
+                    Text("No matches")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 110)
+                .listRowSeparator(.hidden)
             }
             ForEach(groups) { group in
                 Section {
@@ -69,7 +88,7 @@ struct LibraryView: View {
                                         Text(entry.altName).font(.caption).foregroundStyle(.secondary)
                                     }
                                 }
-                                Spacer()
+                                Spacer(minLength: 8)
                                 if !entry.lastAmount.isEmpty {
                                     Text(entry.lastAmount).font(.caption).foregroundStyle(.tertiary)
                                 }
@@ -77,7 +96,12 @@ struct LibraryView: View {
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(.tertiary)
                             }
+                            .frame(minHeight: 40)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                        .listRowInsets(rowInsets)
                     }
                 } header: {
                     HStack(spacing: 7) {
@@ -85,11 +109,18 @@ struct LibraryView: View {
                             .fill(Color(hex: group.category.color))
                             .frame(width: 10, height: 10)
                         Text(group.category.name)
+                            .font(.caption.weight(.semibold))
+                            .textCase(.uppercase)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
                     }
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
+        .contentMargins(.top, 8, for: .scrollContent)
+        .fontDesign(.rounded)
+        .refreshable { await load() }
     }
 
     private func load() async {
