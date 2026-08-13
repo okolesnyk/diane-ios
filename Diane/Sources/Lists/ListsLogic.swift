@@ -1,7 +1,8 @@
 import DianeKit
 import Foundation
 
-// sheet(item:) needs these; the generated types already carry an `id`.
+// sheet(item:)/ForEach need these; the generated types already carry an `id`.
+extension Components.Schemas.List: @retroactive Identifiable {}
 extension Components.Schemas.ListItem: @retroactive Identifiable {}
 extension Components.Schemas.GroceryLibraryItem: @retroactive Identifiable {}
 extension Components.Schemas.GroceryCategory: @retroactive Identifiable {}
@@ -37,12 +38,12 @@ enum ListsLogic {
     }
 
     /// A drag within the DISPLAYED order, mapped back to the full id list the
-    /// server's items-order endpoint expects.
-    static func moved(
-        _ displayed: [Components.Schemas.ListItem],
+    /// server's *-order endpoints expect (items and the lists themselves).
+    static func movedIds<Row: Identifiable>(
+        _ displayed: [Row],
         from source: IndexSet,
         to destination: Int
-    ) -> [String] {
+    ) -> [Row.ID] {
         var rows = displayed
         rows.move(fromOffsets: source, toOffset: destination)
         return rows.map(\.id)

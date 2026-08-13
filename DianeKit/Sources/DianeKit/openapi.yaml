@@ -2250,6 +2250,17 @@ components:
       required:
         - type
         - name
+    ListsOrder:
+      type: object
+      properties:
+        listIds:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          maxItems: 200
+      required:
+        - listIds
     ListDetail:
       type: object
       properties:
@@ -5117,6 +5128,31 @@ paths:
                 $ref: "#/components/schemas/List"
         "401":
           description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/lists-order:
+    put:
+      operationId: orderLists
+      summary: Manual sort for the lists themselves (same semantics as items-order)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ListsOrder"
+      responses:
+        "204":
+          description: Order applied; unnamed lists keep their old positions
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: unknown_list — an id does not belong to this household
           content:
             application/json:
               schema:

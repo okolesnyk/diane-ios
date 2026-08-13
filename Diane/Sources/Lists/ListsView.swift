@@ -60,6 +60,10 @@ struct ListsView: View {
                     Button("Delete", role: .destructive) { confirmingDelete = list }
                 }
             }
+            // Hold-and-drag, same as rows inside a list (owner 2026-08-12).
+            .onMove { source, destination in
+                Task { await move(rows, from: source, to: destination) }
+            }
             Button {
                 creating = true
             } label: {
@@ -68,6 +72,16 @@ struct ListsView: View {
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    private func move(
+        _ displayed: [Components.Schemas.List],
+        from source: IndexSet,
+        to destination: Int
+    ) async {
+        let ids = ListsLogic.movedIds(displayed, from: source, to: destination)
+        _ = try? await context.client.api.orderLists(.init(body: .json(.init(listIds: ids))))
+        await load()
     }
 
     @ViewBuilder

@@ -152,7 +152,7 @@ struct TodoListView: View {
         from source: IndexSet,
         to destination: Int
     ) async {
-        let ids = ListsLogic.moved(displayed, from: source, to: destination)
+        let ids = ListsLogic.movedIds(displayed, from: source, to: destination)
         _ = try? await context.client.api.orderListItems(.init(
             path: .init(id: listID),
             body: .json(.init(itemIds: ids))

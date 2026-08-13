@@ -79,7 +79,17 @@ import Testing
     @Test func movedMapsDisplayedDragToFullIdOrder() {
         let displayed = [item("B", id: "b"), item("D", id: "d"), item("A", id: "a", checked: true)]
         // Drag the last displayed row to the front.
-        #expect(ListsLogic.moved(displayed, from: IndexSet(integer: 2), to: 0) == ["a", "b", "d"])
+        #expect(ListsLogic.movedIds(displayed, from: IndexSet(integer: 2), to: 0) == ["a", "b", "d"])
+    }
+
+    @Test func movedIdsWorksForListsToo() {
+        let lists: [Components.Schemas.List] = [
+            .init(id: "a", _type: .grocery, name: "Costco", sortOrder: 0, itemCount: 0, checkedCount: 0, createdAt: "2026-08-12T00:00:00Z"),
+            .init(id: "b", _type: .checklist, name: "Packing", sortOrder: 1, itemCount: 0, checkedCount: 0, createdAt: "2026-08-12T00:00:00Z"),
+            .init(id: "c", _type: .plain, name: "Projects", sortOrder: 2, itemCount: 0, checkedCount: 0, createdAt: "2026-08-12T00:00:00Z"),
+        ]
+        // Drag Projects to the top.
+        #expect(ListsLogic.movedIds(lists, from: IndexSet(integer: 2), to: 0) == ["c", "a", "b"])
     }
 
     // MARK: Grocery grouping
