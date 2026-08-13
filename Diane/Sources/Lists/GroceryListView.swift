@@ -1,13 +1,15 @@
 import DianeKit
 import SwiftUI
 
-/// One grocery list (design pass rev 3): the add field lives at the top and
-/// never pushes a page — typing filters the library into colored hint chips
-/// (tap = added; checkmark chip = already on the list; Enter adds anything
-/// unknown straight under Other, one step). Rows group by category and walk
-/// the aisles; tapping a row drops it into the cart at the bottom; the
-/// amount pill edits through a centered alert; swiping left refiles
-/// (teaching the library) or deletes. The book up top opens the library.
+/// One grocery list (design pass rev 3 + history model, owner 2026-08-12):
+/// the add field lives at the top and never pushes a page — typing filters
+/// the library into colored hint chips (tap = added; checkmark chip =
+/// already active; Enter adds anything unknown straight under Other, one
+/// step). Rows group by category and walk the aisles; tapping a row crosses
+/// it into HISTORY at the bottom — nothing is deleted at checkout. History
+/// rows resurrect by tap or by re-adding the name (the server dedupes).
+/// The amount pill edits through a centered alert; swiping left refiles
+/// (teaching the library) or deletes for real. The book opens the library.
 struct GroceryListView: View {
     let context: SignedInContext
     let listID: String
@@ -23,27 +25,28 @@ struct GroceryListView: View {
     @State private var amountEditing: Components.Schemas.ListItem?
     @State private var amountDraft = ""
     @State private var refiling: Components.Schemas.ListItem?
-    @State private var confirmingClear = false
     @FocusState private var addFocused: Bool
 
     private let rowInsets = EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16)
     private let furnitureInsets = EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
 
     var body: some View {
-        Group {
-            switch items {
-            case .loading:
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .failed(let message):
-                ContentUnavailableView {
-                    Label("Can't reach the server", systemImage: "wifi.exclamationmark")
-                } description: {
-                    Text(message)
-                } actions: {
-                    Button("Try again") { Task { await load() } }
+        GeometryReader { geo in
+            Group {
+                switch items {
+                case .loading:
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .failed(let message):
+                    ContentUnavailableView {
+                        Label("Can't reach the server", systemImage: "wifi.exclamationmark")
+                    } description: {
+                        Text(message)
+                    } actions: {
+                        Button("Try again") { Task { await load() } }
+                    }
+                case .loaded(let rows):
+                    listBody(rows, screenHeight: geo.size.height)
                 }
-            case .loaded(let rows):
-                listBody(rows)
             }
         }
         .navigationTitle(listName)
@@ -70,12 +73,6 @@ struct GroceryListView: View {
         } message: { item in
             Text(item.name)
         }
-        .alert("Clear the cart?", isPresented: $confirmingClear) {
-            Button("Cancel", role: .cancel) {}
-            Button("Clear", role: .destructive) { Task { await clearCart() } }
-        } message: {
-            Text("Bought rows leave the list. The library keeps them.")
-        }
         .sheet(item: $refiling) { item in
             CategoryPickSheet(categories: categories, selected: item.categoryId) { categoryID in
                 Task { await refile(item, to: categoryID) }
@@ -85,9 +82,9 @@ struct GroceryListView: View {
 
     // MARK: - Body
 
-    private func listBody(_ rows: [Components.Schemas.ListItem]) -> some View {
+    private func listBody(_ rows: [Components.Schemas.ListItem], screenHeight: CGFloat) -> some View {
         let groups = ListsLogic.grouped(items: rows, categories: categories)
-        let cart = rows.filter(\.checked)
+        let history = rows.filter(\.checked)
         return List {
             addSection(rows)
             if rows.isEmpty, query.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -109,14 +106,21 @@ struct GroceryListView: View {
                     categoryHeader(group.category)
                 }
             }
-            if !cart.isEmpty {
-                cartSection(cart)
+            if !history.isEmpty {
+                // History sits LOW (owner 2026-08-12, reference app): its top
+                // never rises above ~30%-from-the-bottom. A short list gets
+                // this clear runway; a long list pushes history further down.
+                Color.clear
+                    .frame(height: historyRunway(groups: groups, screenHeight: screenHeight))
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                historySection(history)
             }
         }
         .listStyle(.plain)
         // Tight sections: with one item per aisle the default chrome ate
-        // half the screen (owner 2026-08-12, on device).
-        .listSectionSpacing(6)
+        // half the screen (owner 2026-08-12, on device; "smaller" pass 2).
+        .listSectionSpacing(2)
         .contentMargins(.top, 8, for: .scrollContent)
         .fontDesign(.rounded)
         .refreshable { await load() }
@@ -124,7 +128,13 @@ struct GroceryListView: View {
 
     @ViewBuilder
     private func addSection(_ rows: [Components.Schemas.ListItem]) -> some View {
-        let hints = ListsLogic.hints(query: query, library: library, listNames: rows.map(\.name))
+        // Only ACTIVE rows count as "on the list" — a history match must
+        // stay a live chip so tapping it resurrects (the server dedupes).
+        let hints = ListsLogic.hints(
+            query: query,
+            library: library,
+            listNames: rows.filter { !$0.checked }.map(\.name)
+        )
         let exact = ListsLogic.exactMatch(query: query, library: library)
         TextField("Add or search", text: $query)
             .focused($addFocused)
@@ -202,22 +212,21 @@ struct GroceryListView: View {
         .buttonStyle(.plain)
     }
 
+    /// Text-only and tiny — the category color now rides every ROW as its
+    /// trailing line (owner 2026-08-12), so the header dot went with it.
     private func categoryHeader(_ category: Components.Schemas.GroceryCategory) -> some View {
-        HStack(spacing: 7) {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(Color(hex: category.color))
-                .frame(width: 10, height: 10)
-            Text(category.name)
-                .font(.caption.weight(.semibold))
-                .textCase(.uppercase)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-        }
-        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+        Text(category.name)
+            .font(.system(size: 10, weight: .semibold))
+            .textCase(.uppercase)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 0, trailing: 16))
     }
 
-    /// Whole-row tap checks into the cart (owner-settled: the row IS the
-    /// checkbox — groceries have no detail to open).
+    /// Whole-row tap crosses into history (owner-settled: the row IS the
+    /// checkbox — groceries have no detail to open). Each row wears its
+    /// category color as a full-height bar hugging the LEFT screen edge —
+    /// the reference app's language (owner 2026-08-12, screenshot).
     private func itemRow(_ item: Components.Schemas.ListItem) -> some View {
         Button {
             Task { await setChecked(item, to: true) }
@@ -240,9 +249,34 @@ struct GroceryListView: View {
         .buttonStyle(.plain)
         .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
         .listRowInsets(rowInsets)
+        // The bar lives on the row BACKGROUND, so it spans the row's full
+        // height and sits at the true edge, outside the content insets.
+        .listRowBackground(edgeBar(item))
         .swipeActions(edge: .trailing) {
             Button("Delete", role: .destructive) { Task { await delete(item) } }
             Button("Category") { refiling = item }.tint(Color(hex: "#5352d1"))
+        }
+    }
+
+    /// The empty runway that keeps HISTORY's top edge at or below the
+    /// 70%-of-screen line. Estimated from the standard row metrics (add
+    /// field 56, header ~24, row ~44.5) — exact enough at default type
+    /// sizes; Dynamic Type users simply get a shorter runway.
+    private func historyRunway(
+        groups: [ListsLogic.CategoryGroup],
+        screenHeight: CGFloat
+    ) -> CGFloat {
+        let activeRows = groups.reduce(0) { $0 + $1.items.count }
+        let estimated = 56.0 + CGFloat(groups.count) * 24.0 + CGFloat(activeRows) * 44.5
+        return max(0, screenHeight * 0.7 - estimated)
+    }
+
+    /// Full-height category bar at the leading screen edge.
+    private func edgeBar(_ item: Components.Schemas.ListItem) -> some View {
+        let color = categories.first { $0.id == item.categoryId }?.color ?? "#9a9fa8"
+        return HStack(spacing: 0) {
+            Color(hex: color).frame(width: 5)
+            Color.clear
         }
     }
 
@@ -269,20 +303,18 @@ struct GroceryListView: View {
         }
     }
 
-    /// Bought rows go whole-row gray, exactly like completed chores
-    /// (owner 2026-08-08); tapping puts one back.
-    private func cartSection(_ cart: [Components.Schemas.ListItem]) -> some View {
+    /// Crossed rows are HISTORY, not a cart (owner 2026-08-12): everything
+    /// that was ever on the list waits here. The zone reads clearly apart
+    /// from the live list — gray panel rows, no color bars, like the
+    /// reference app's bottom strip. Tapping one puts it straight back;
+    /// only the swipe deletes it for real.
+    private func historySection(_ history: [Components.Schemas.ListItem]) -> some View {
         Section {
-            ForEach(cart, id: \.id) { item in
+            ForEach(history, id: \.id) { item in
                 Button {
                     Task { await setChecked(item, to: false) }
                 } label: {
                     HStack(spacing: 10) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 26))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.green)
-                            .frame(width: 44, height: 44)
                         Text(item.name)
                             .strikethrough(true, color: .secondary)
                             .foregroundStyle(.secondary)
@@ -291,29 +323,28 @@ struct GroceryListView: View {
                             Text(item.amount).font(.caption).foregroundStyle(.tertiary)
                         }
                     }
+                    .frame(minHeight: 40)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .grayscale(1)
-                .opacity(0.6)
+                .opacity(0.7)
                 .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                 .listRowInsets(rowInsets)
+                .listRowBackground(Color(.secondarySystemBackground))
                 .swipeActions(edge: .trailing) {
                     Button("Delete", role: .destructive) { Task { await delete(item) } }
                 }
             }
         } header: {
-            HStack(spacing: 6) {
-                Text("In the cart · \(cart.count)")
-                    .font(.caption.weight(.semibold))
-                    .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 0)
-                Button("Clear cart") { confirmingClear = true }
-                    .font(.caption.weight(.semibold))
-                    .textCase(nil)
-            }
-            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
+            // Not a category — keeps its size (owner: "only categories
+            // should get smaller").
+            Text("History")
+                .font(.caption.weight(.semibold))
+                .textCase(.uppercase)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .listRowInsets(EdgeInsets(top: 18, leading: 16, bottom: 4, trailing: 16))
         }
     }
 
@@ -397,11 +428,6 @@ struct GroceryListView: View {
         _ = try? await context.client.api.deleteListItem(
             .init(path: .init(id: listID, itemId: item.id))
         )
-        await load()
-    }
-
-    private func clearCart() async {
-        _ = try? await context.client.api.clearCheckedItems(.init(path: .init(id: listID)))
         await load()
     }
 }

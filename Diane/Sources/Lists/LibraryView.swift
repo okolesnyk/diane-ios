@@ -104,22 +104,22 @@ struct LibraryView: View {
                         .listRowInsets(rowInsets)
                     }
                 } header: {
-                    HStack(spacing: 7) {
-                        RoundedRectangle(cornerRadius: 3)
+                    HStack(spacing: 6) {
+                        RoundedRectangle(cornerRadius: 2.5)
                             .fill(Color(hex: group.category.color))
-                            .frame(width: 10, height: 10)
+                            .frame(width: 8, height: 8)
                         Text(group.category.name)
-                            .font(.caption.weight(.semibold))
+                            .font(.caption2.weight(.semibold))
                             .textCase(.uppercase)
                             .foregroundStyle(.secondary)
                         Spacer(minLength: 0)
                     }
-                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
+                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 0, trailing: 16))
                 }
             }
         }
         .listStyle(.plain)
-        .listSectionSpacing(6)
+        .listSectionSpacing(2)
         .contentMargins(.top, 8, for: .scrollContent)
         .fontDesign(.rounded)
         .refreshable { await load() }

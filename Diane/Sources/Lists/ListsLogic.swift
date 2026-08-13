@@ -12,16 +12,15 @@ extension Components.Schemas.GroceryCategory: @retroactive Identifiable {}
 enum ListsLogic {
     // MARK: - Badges
 
-    /// The root rows' status line, straight from the mock:
-    /// grocery "14 to buy · 2 in cart", checklist "11 of 18 done",
-    /// plain "6 items"; anything empty reads "Empty".
+    /// The root rows' status line: grocery "14 to buy" (crossed rows are
+    /// quiet history, not a cart — owner 2026-08-12), checklist "11 of 18
+    /// done", plain "6 items"; anything empty reads "Empty".
     static func badge(type: Components.Schemas.ListType, itemCount: Int, checkedCount: Int) -> String {
         guard itemCount > 0 else { return "Empty" }
         switch type {
         case .grocery:
             let toBuy = itemCount - checkedCount
-            let cart = checkedCount > 0 ? " · \(checkedCount) in cart" : ""
-            return "\(toBuy) to buy\(cart)"
+            return toBuy > 0 ? "\(toBuy) to buy" : "All bought"
         case .checklist:
             return "\(checkedCount) of \(itemCount) done"
         case .plain:

@@ -49,9 +49,11 @@ import Testing
 
     // MARK: Badges
 
-    @Test func groceryBadgeCountsToBuyAndCart() {
-        #expect(ListsLogic.badge(type: .grocery, itemCount: 16, checkedCount: 2) == "14 to buy · 2 in cart")
+    @Test func groceryBadgeCountsToBuyOnly() {
+        // History is quiet — crossed rows never show in the badge.
+        #expect(ListsLogic.badge(type: .grocery, itemCount: 16, checkedCount: 2) == "14 to buy")
         #expect(ListsLogic.badge(type: .grocery, itemCount: 4, checkedCount: 0) == "4 to buy")
+        #expect(ListsLogic.badge(type: .grocery, itemCount: 3, checkedCount: 3) == "All bought")
     }
 
     @Test func checklistBadgeReadsDone() {
