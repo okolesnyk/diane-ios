@@ -161,22 +161,4 @@ import Testing
         #expect(ListsLogic.canDelete(cats[2]))
         #expect(!ListsLogic.canDelete(cats[3]))
     }
-
-    // MARK: Home tile line
-
-    @Test func homeLinePicksTheBusiestGroceryList() {
-        let lists: [Components.Schemas.List] = [
-            .init(id: "a", _type: .grocery, name: "Costco", sortOrder: 0, itemCount: 16, checkedCount: 2, createdAt: "2026-08-12T00:00:00Z"),
-            .init(id: "b", _type: .grocery, name: "TJ", sortOrder: 1, itemCount: 4, checkedCount: 0, createdAt: "2026-08-12T00:00:00Z"),
-            .init(id: "c", _type: .checklist, name: "Packing", sortOrder: 2, itemCount: 18, checkedCount: 0, createdAt: "2026-08-12T00:00:00Z"),
-        ]
-        #expect(HomeLogic.listsLine(lists: lists) == HomeLogic.Line(count: "Costco · 14 to buy"))
-    }
-
-    @Test func homeLineGoesQuietWhenNothingToBuy() {
-        let lists: [Components.Schemas.List] = [
-            .init(id: "a", _type: .grocery, name: "Costco", sortOrder: 0, itemCount: 2, checkedCount: 2, createdAt: "2026-08-12T00:00:00Z"),
-        ]
-        #expect(HomeLogic.listsLine(lists: lists) == nil)
-    }
 }

@@ -41,6 +41,7 @@ struct HomeView: View {
     @Environment(SyncSignals.self) private var signals
     @Environment(AppState.self) private var appState
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var editing = false
     @State private var snapshot = HomeLogic.Snapshot()
@@ -93,7 +94,7 @@ struct HomeView: View {
                             }
                         }
                         ForEach(FutureModule.allCases) { future in
-                            tile(title: future.title, systemImage: future.systemImage, comingLater: true)
+                            tile(title: future.title, systemImage: future.systemImage, comingLater: true, artwork: future.artworkName)
                         }
                     }
                     .padding(16)
@@ -136,7 +137,8 @@ struct HomeView: View {
                 title: module.title,
                 systemImage: module.systemImage,
                 line: pulse.line(for: module),
-                dot: pulse.showsDot(for: module)
+                dot: pulse.showsDot(for: module),
+                artwork: module.artworkName
             )
         }
         .buttonStyle(.plain)
@@ -158,7 +160,7 @@ struct HomeView: View {
         let inBar = layout.barItems.contains(.module(module))
         // Edit mode: the badge owns the corner the icon sits in — content
         // steps down and the late dot hides (the design review's fix).
-        return tile(title: module.title, systemImage: module.systemImage, line: pulse.line(for: module), editing: true)
+        return tile(title: module.title, systemImage: module.systemImage, line: pulse.line(for: module), editing: true, artwork: module.artworkName)
             .overlay(alignment: .topLeading) {
                 Button {
                     withAnimation {
@@ -191,15 +193,17 @@ struct HomeView: View {
     /// header row, one count line pinned at the bottom, red dot top-right
     /// when Chores holds something late. No hard height cap — Dynamic Type
     /// grows the tile (the review's rule).
+    @ViewBuilder
     private func tile(
         title: String,
         systemImage: String,
         line: HomeLogic.Line? = nil,
         dot: Bool = false,
         comingLater: Bool = false,
-        editing: Bool = false
+        editing: Bool = false,
+        artwork: String? = nil
     ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let content = VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 7) {
                 Image(systemName: systemImage)
                     .font(.system(size: 17, weight: .medium))
@@ -223,7 +227,17 @@ struct HomeView: View {
         // down so they never collide.
         .padding(.top, editing ? 10 : 0)
         .frame(maxWidth: .infinity, minHeight: 100, alignment: .topLeading)
-        .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 16))
+        .background {
+            if let artwork {
+                Image(artwork).resizable().scaledToFill()
+                    // Dark mode: a scrim tones the light art down so the
+                    // grid doesn't glow on the black page.
+                    .overlay { if colorScheme == .dark { Color.black.opacity(0.35) } }
+            } else {
+                Rectangle().fill(.fill.tertiary)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(alignment: .topTrailing) {
             if dot && !editing {
                 Circle().fill(.red).frame(width: 8, height: 8).padding(10)
@@ -232,6 +246,13 @@ struct HomeView: View {
         .opacity(comingLater ? 0.55 : 1)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText(title: title, line: line, comingLater: comingLater))
+        if artwork != nil {
+            // The art is a light card in both app themes, so the text keeps
+            // its light-scheme colors — dark-mode white-on-white otherwise.
+            content.environment(\.colorScheme, .light)
+        } else {
+            content
+        }
     }
 
     /// "3 open · 1 late" — the count carries primary weight, the late part
@@ -271,7 +292,6 @@ struct HomeView: View {
             async let waitingCall = context.client.api.listRewardRedemptions(
                 .init(query: .init(status: .redeemed, limit: RewardsLogic.waitingLimit))
             )
-            async let listsCall = context.client.api.listLists(.init())
 
             var next = HomeLogic.Snapshot()
             switch try await eventsCall {
@@ -287,9 +307,6 @@ struct HomeView: View {
             }
             if case .ok(let ok) = try await waitingCall {
                 next.waiting = try ok.body.json.redemptions.count
-            }
-            if case .ok(let ok) = try await listsCall {
-                next.lists = try ok.body.json.lists
             }
             snapshot = next
         } catch {

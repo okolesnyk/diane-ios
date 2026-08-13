@@ -121,6 +121,9 @@ struct GroceryListView: View {
         // Tight sections: with one item per aisle the default chrome ate
         // half the screen (owner 2026-08-12, on device; "smaller" pass 2).
         .listSectionSpacing(2)
+        // List's own row-height floor (~44pt, larger with bigger text
+        // settings) otherwise swallows the rows' shorter minHeight.
+        .environment(\.defaultMinListRowHeight, 34)
         .contentMargins(.top, 8, for: .scrollContent)
         .fontDesign(.rounded)
         .refreshable { await load() }

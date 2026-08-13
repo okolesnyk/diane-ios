@@ -46,6 +46,9 @@ enum DianeModule: String, CaseIterable, Identifiable, Codable {
         case .lists: modules.lists
         }
     }
+
+    /// Home-tile background art (artwork/Tiles, downscaled into the catalog).
+    var artworkName: String { "tile-\(rawValue)" }
 }
 
 /// Tiles for modules that exist in the design but not yet in the product —
@@ -70,6 +73,9 @@ enum FutureModule: String, CaseIterable, Identifiable {
         case .assistant: "sparkles"
         }
     }
+
+    /// Home-tile background art (artwork/Tiles, downscaled into the catalog).
+    var artworkName: String { "tile-\(rawValue)" }
 }
 
 enum NavigationLogic {
