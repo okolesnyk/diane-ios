@@ -159,6 +159,10 @@ struct EventDetailView: View {
     @State private var confirmingDelete = false
     @State private var busy = false
     @State private var errorMessage: String?
+    /// Notifications v1: the lead override, editable on ANY event — synced
+    /// included (Diane-side metadata, the /reminder sub-route).
+    @State private var reminderLead: Int?
+    @State private var reminderSeeded = false
 
     init(
         context: SignedInContext,
@@ -189,6 +193,41 @@ struct EventDetailView: View {
         }
     }
 
+    /// Picking IS the save — the sub-route write works for synced events too.
+    private var reminderSection: some View {
+        Section {
+            Picker("Reminder", selection: $reminderLead) {
+                Text("Default").tag(Int?.none)
+                Text("At start").tag(Int?.some(0))
+                ForEach([5, 10, 15, 30, 60], id: \.self) { minutes in
+                    Text("\(minutes) min before").tag(Int?.some(minutes))
+                }
+            }
+            .listRowInsets(eventDetailRowInsets)
+            .onChange(of: reminderLead) { previous, next in
+                guard reminderSeeded, previous != next else { return }
+                Task { await saveReminder(next) }
+            }
+        }
+    }
+
+    private func saveReminder(_ minutes: Int?) async {
+        do {
+            let output = try await context.client.api.updateEventReminder(.init(
+                path: .init(id: occurrence.eventId),
+                body: .json(.init(reminderLeadMinutes: minutes))
+            ))
+            switch output {
+            case .ok: onChanged()
+            case .unauthorized: appState.handleUnauthorized()
+            default: errorMessage = "That didn't save. Try again?"
+            }
+        } catch {
+            guard !isTaskCancellation(error) else { return }
+            errorMessage = "Couldn't reach your home server."
+        }
+    }
+
     private var detailList: some View {
             List {
                 headerSection
@@ -199,6 +238,7 @@ struct EventDetailView: View {
                     }
                 }
                 membersSection
+                if !occurrence.allDay { reminderSection }
                 actionsSection
             }
             .listStyle(.plain)
@@ -212,6 +252,11 @@ struct EventDetailView: View {
                 }
             }
             .task { await loadCalendars() }
+            .onAppear {
+                guard !reminderSeeded else { return }
+                reminderSeeded = true
+                reminderLead = occurrence.reminderLeadMinutes
+            }
             .alert(errorMessage ?? "Something went wrong.", isPresented: errorShown) {
                 Button("OK", role: .cancel) {}
             }

@@ -197,6 +197,17 @@ struct SettingsView: View {
                             }
                         }
                         .listRowInsets(settingsRowInsets)
+                        NavigationLink {
+                            ReminderLeadView(context: context)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Reminder lead")
+                                Text("how early events and timed chores ring")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .listRowInsets(settingsRowInsets)
                     } header: {
                         header("Household")
                     }

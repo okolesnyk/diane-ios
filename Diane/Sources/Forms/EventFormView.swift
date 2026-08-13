@@ -218,6 +218,9 @@ enum EventFormLogic {
         var hasUntil = false
         /// Inclusive local date, "YYYY-MM-DD".
         var until = ""
+        /// Reminder lead override in minutes; nil = the household default
+        /// (notifications v1). -1 is never stored — the picker maps it.
+        var reminderLeadMinutes: Int?
     }
 
     static func initial(
@@ -284,6 +287,7 @@ enum EventFormLogic {
         state.location = occurrence.location ?? ""
         state.calendarId = occurrence.calendarId
         state.memberIds = Set(occurrence.memberIds ?? [])
+        state.reminderLeadMinutes = occurrence.reminderLeadMinutes
         if let recurrence = occurrence.recurrence {
             state.repeats = Repeat(rawValue: recurrence.freq.rawValue) ?? .none
             state.interval = recurrence.interval ?? 1
@@ -465,7 +469,8 @@ enum EventFormLogic {
             location: trimmedOrNil(state.location),
             memberIds: memberIdsWire(state),
             allDay: state.allDay,
-            recurrence: createRecurrence(recurrenceParts(state))
+            recurrence: createRecurrence(recurrenceParts(state)),
+            reminderLeadMinutes: state.reminderLeadMinutes
         )
         if state.allDay {
             body.startDate = state.firstDay
@@ -485,7 +490,8 @@ enum EventFormLogic {
             location: trimmedOrNil(state.location),
             memberIds: memberIdsWire(state),
             allDay: state.allDay,
-            recurrence: updateRecurrence(recurrenceParts(state))
+            recurrence: updateRecurrence(recurrenceParts(state)),
+            reminderLeadMinutes: state.reminderLeadMinutes
         )
         if state.allDay {
             body.startDate = state.firstDay
@@ -759,6 +765,8 @@ struct EventFormView: View {
 
             whenSection
 
+            reminderSection
+
             Section {
                 TextField("Location", text: FormLimits.capping($state.location, FormLimits.eventLocation))
             }
@@ -839,6 +847,25 @@ struct EventFormView: View {
         } footer: {
             if let seriesStartNote {
                 Text("This repeats — editing changes the whole series, which starts \(seriesStartNote).")
+            }
+        }
+    }
+
+    /// Notifications v1: the per-event lead override. All-day events have no
+    /// instant to ring at, so the row hides with them.
+    @ViewBuilder
+    private var reminderSection: some View {
+        if !state.allDay {
+            Section {
+                Picker("Reminder", selection: $state.reminderLeadMinutes) {
+                    Text("Default").tag(Int?.none)
+                    Text("At start").tag(Int?.some(0))
+                    ForEach([5, 10, 15, 30, 60], id: \.self) { minutes in
+                        Text("\(minutes) min before").tag(Int?.some(minutes))
+                    }
+                }
+            } footer: {
+                Text("Default follows the household's reminder lead in Settings.")
             }
         }
     }

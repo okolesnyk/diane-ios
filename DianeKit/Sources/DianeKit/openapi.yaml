@@ -457,6 +457,10 @@ components:
             - label
         modules:
           $ref: "#/components/schemas/HouseholdModules"
+        reminderLeadMinutes:
+          type: integer
+          minimum: 0
+          maximum: 1440
         createdAt:
           type: string
       required:
@@ -465,6 +469,7 @@ components:
         - tz
         - weatherLocation
         - modules
+        - reminderLeadMinutes
         - createdAt
     HouseholdModules:
       type: object
@@ -518,6 +523,10 @@ components:
               type: boolean
             rewards:
               type: boolean
+        reminderLeadMinutes:
+          type: integer
+          minimum: 0
+          maximum: 1440
     CalendarAccountList:
       type: object
       properties:
@@ -805,6 +814,9 @@ components:
               pattern: ^\d{4}-\d{2}-\d{2}$
           required:
             - freq
+        reminderLeadMinutes:
+          type: integer
+          nullable: true
         seriesStartsAt:
           type: string
           nullable: true
@@ -825,6 +837,7 @@ components:
         - memberIds
         - color
         - recurrence
+        - reminderLeadMinutes
         - seriesStartsAt
         - seriesStartDate
     EventCreated:
@@ -924,6 +937,11 @@ components:
               pattern: ^\d{4}-\d{2}-\d{2}$
           required:
             - freq
+        reminderLeadMinutes:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 1440
       required:
         - calendarId
         - summary
@@ -1003,6 +1021,11 @@ components:
               pattern: ^\d{4}-\d{2}-\d{2}$
           required:
             - freq
+        reminderLeadMinutes:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 1440
       required:
         - summary
         - allDay
@@ -1018,6 +1041,16 @@ components:
           maxItems: 20
       required:
         - memberIds
+    EventReminderUpdate:
+      type: object
+      properties:
+        reminderLeadMinutes:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 1440
+      required:
+        - reminderLeadMinutes
     WeatherResponse:
       type: object
       properties:
@@ -3633,6 +3666,41 @@ paths:
                 $ref: "#/components/schemas/Error"
         "422":
           description: memberIds contains a non-member
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/events/{id}/reminder:
+    patch:
+      operationId: updateEventReminder
+      summary: Set the reminder lead override (works on synced events too)
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventReminderUpdate"
+      responses:
+        "200":
+          description: Reminder lead updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventCreated"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Event not found in this household
           content:
             application/json:
               schema:
