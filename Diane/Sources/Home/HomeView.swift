@@ -232,7 +232,7 @@ struct HomeView: View {
                 Image(artwork).resizable().scaledToFill()
                     // Dark mode: a scrim tones the light art down so the
                     // grid doesn't glow on the black page.
-                    .overlay { if colorScheme == .dark { Color.black.opacity(0.35) } }
+                    .overlay { if colorScheme == .dark { Color.black.opacity(0.25) } }
             } else {
                 Rectangle().fill(.fill.tertiary)
             }
