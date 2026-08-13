@@ -114,6 +114,9 @@ struct GroceryListView: View {
             }
         }
         .listStyle(.plain)
+        // Tight sections: with one item per aisle the default chrome ate
+        // half the screen (owner 2026-08-12, on device).
+        .listSectionSpacing(6)
         .contentMargins(.top, 8, for: .scrollContent)
         .fontDesign(.rounded)
         .refreshable { await load() }
@@ -153,13 +156,29 @@ struct GroceryListView: View {
             guard !hint.onList else { return }
             Task { await add(entry: hint.entry) }
         } label: {
-            Text(hint.onList ? "✓ \(hint.label)" : hint.label)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.white)
+            // Already on the list: neutral and quiet, never a faded color
+            // chip — white on washed-out pink was unreadable (owner
+            // 2026-08-12, on device).
+            if hint.onList {
+                HStack(spacing: 4) {
+                    Image(systemName: "checkmark")
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.green)
+                    Text(hint.label)
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
                 .padding(.horizontal, 11)
                 .padding(.vertical, 6)
-                .background(Color(hex: color), in: RoundedRectangle(cornerRadius: 9))
-                .opacity(hint.onList ? 0.55 : 1)
+                .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 9))
+            } else {
+                Text(hint.label)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .background(Color(hex: color), in: RoundedRectangle(cornerRadius: 9))
+            }
         }
         .buttonStyle(.plain)
         .disabled(hint.onList)
@@ -194,6 +213,7 @@ struct GroceryListView: View {
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
         }
+        .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
     }
 
     /// Whole-row tap checks into the cart (owner-settled: the row IS the
@@ -293,6 +313,7 @@ struct GroceryListView: View {
                     .font(.caption.weight(.semibold))
                     .textCase(nil)
             }
+            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 2, trailing: 16))
         }
     }
 

@@ -114,10 +114,12 @@ struct LibraryView: View {
                             .foregroundStyle(.secondary)
                         Spacer(minLength: 0)
                     }
+                    .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
                 }
             }
         }
         .listStyle(.plain)
+        .listSectionSpacing(6)
         .contentMargins(.top, 8, for: .scrollContent)
         .fontDesign(.rounded)
         .refreshable { await load() }
