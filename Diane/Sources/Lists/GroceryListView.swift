@@ -147,7 +147,7 @@ struct GroceryListView: View {
             .listRowInsets(furnitureInsets)
             .listRowSeparator(.hidden)
         if !hints.isEmpty || (exact == nil && !query.trimmingCharacters(in: .whitespaces).isEmpty) {
-            FlowLayout(spacing: 7) {
+            FlowLayout(spacing: 8) {
                 ForEach(hints) { hint in
                     hintChip(hint)
                 }
@@ -172,22 +172,22 @@ struct GroceryListView: View {
             if hint.onList {
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark")
-                        .font(.caption2.weight(.bold))
+                        .font(.caption.weight(.bold))
                         .foregroundStyle(.green)
                     Text(hint.label)
-                        .font(.footnote.weight(.semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, 11)
-                .padding(.vertical, 6)
-                .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 9))
+                .padding(.horizontal, 13)
+                .padding(.vertical, 8)
+                .background(Color(.secondarySystemFill), in: RoundedRectangle(cornerRadius: 10))
             } else {
                 Text(hint.label)
-                    .font(.footnote.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 6)
-                    .background(Color(hex: color), in: RoundedRectangle(cornerRadius: 9))
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 8)
+                    .background(Color(hex: color), in: RoundedRectangle(cornerRadius: 10))
             }
         }
         .buttonStyle(.plain)
@@ -199,12 +199,12 @@ struct GroceryListView: View {
             Task { await addFromEnter() }
         } label: {
             Text("+ Add \u{201C}\(query.trimmingCharacters(in: .whitespaces))\u{201D}")
-                .font(.footnote.weight(.semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 8)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 9)
+                    RoundedRectangle(cornerRadius: 10)
                         .strokeBorder(style: StrokeStyle(lineWidth: 1.2, dash: [4]))
                         .foregroundStyle(.tertiary)
                 )
@@ -243,7 +243,7 @@ struct GroceryListView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .frame(minHeight: 40)
+            .frame(minHeight: 34)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -260,14 +260,14 @@ struct GroceryListView: View {
 
     /// The empty runway that keeps HISTORY's top edge at or below the
     /// 70%-of-screen line. Estimated from the standard row metrics (add
-    /// field 56, header ~24, row ~44.5) — exact enough at default type
+    /// field 56, header ~24, row ~38.5) — exact enough at default type
     /// sizes; Dynamic Type users simply get a shorter runway.
     private func historyRunway(
         groups: [ListsLogic.CategoryGroup],
         screenHeight: CGFloat
     ) -> CGFloat {
         let activeRows = groups.reduce(0) { $0 + $1.items.count }
-        let estimated = 56.0 + CGFloat(groups.count) * 24.0 + CGFloat(activeRows) * 44.5
+        let estimated = 56.0 + CGFloat(groups.count) * 24.0 + CGFloat(activeRows) * 38.5
         return max(0, screenHeight * 0.7 - estimated)
     }
 
@@ -323,7 +323,7 @@ struct GroceryListView: View {
                             Text(item.amount).font(.caption).foregroundStyle(.tertiary)
                         }
                     }
-                    .frame(minHeight: 40)
+                    .frame(minHeight: 34)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
