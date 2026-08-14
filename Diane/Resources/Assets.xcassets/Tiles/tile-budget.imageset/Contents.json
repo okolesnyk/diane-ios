@@ -1,7 +1,7 @@
 {
   "images" : [
     {
-      "filename" : "tile-calendar.png",
+      "filename" : "tile-budget.png",
       "idiom" : "universal"
     },
     {
@@ -11,7 +11,7 @@
           "value" : "dark"
         }
       ],
-      "filename" : "tile-calendar-dark.png",
+      "filename" : "tile-budget-dark.png",
       "idiom" : "universal"
     }
   ],

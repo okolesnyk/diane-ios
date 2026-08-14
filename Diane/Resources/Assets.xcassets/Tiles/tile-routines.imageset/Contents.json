@@ -3,6 +3,16 @@
     {
       "filename" : "tile-routines.png",
       "idiom" : "universal"
+    },
+    {
+      "appearances" : [
+        {
+          "appearance" : "luminosity",
+          "value" : "dark"
+        }
+      ],
+      "filename" : "tile-routines-dark.png",
+      "idiom" : "universal"
     }
   ],
   "info" : {

@@ -3,6 +3,16 @@
     {
       "filename" : "tile-rewards.png",
       "idiom" : "universal"
+    },
+    {
+      "appearances" : [
+        {
+          "appearance" : "luminosity",
+          "value" : "dark"
+        }
+      ],
+      "filename" : "tile-rewards-dark.png",
+      "idiom" : "universal"
     }
   ],
   "info" : {

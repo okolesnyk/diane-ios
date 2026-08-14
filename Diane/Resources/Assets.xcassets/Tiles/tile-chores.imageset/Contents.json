@@ -3,6 +3,16 @@
     {
       "filename" : "tile-chores.png",
       "idiom" : "universal"
+    },
+    {
+      "appearances" : [
+        {
+          "appearance" : "luminosity",
+          "value" : "dark"
+        }
+      ],
+      "filename" : "tile-chores-dark.png",
+      "idiom" : "universal"
     }
   ],
   "info" : {

@@ -3,6 +3,16 @@
     {
       "filename" : "tile-photos.png",
       "idiom" : "universal"
+    },
+    {
+      "appearances" : [
+        {
+          "appearance" : "luminosity",
+          "value" : "dark"
+        }
+      ],
+      "filename" : "tile-photos-dark.png",
+      "idiom" : "universal"
     }
   ],
   "info" : {

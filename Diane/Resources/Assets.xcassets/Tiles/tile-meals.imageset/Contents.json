@@ -3,6 +3,16 @@
     {
       "filename" : "tile-meals.png",
       "idiom" : "universal"
+    },
+    {
+      "appearances" : [
+        {
+          "appearance" : "luminosity",
+          "value" : "dark"
+        }
+      ],
+      "filename" : "tile-meals-dark.png",
+      "idiom" : "universal"
     }
   ],
   "info" : {
