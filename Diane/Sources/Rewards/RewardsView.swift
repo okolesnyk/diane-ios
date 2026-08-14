@@ -727,8 +727,10 @@ private struct RewardFormView: View {
             Form {
                 Section {
                     HStack(spacing: 10) {
-                        EmojiTextField(emoji: $emoji, focused: $emojiFocused)
-                            .frame(width: 44, height: 32)
+                        // The well, not a bare field: sparkles on a tinted
+                        // slot so it reads as the emoji picker it is (owner
+                        // 2026-08-14 — it looked like stray padding).
+                        EmojiWell(emoji: $emoji, focused: $emojiFocused)
                         TextField("Reward name", text: $title)
                     }
                     Stepper(value: $cost, in: 1...500, step: 1) {

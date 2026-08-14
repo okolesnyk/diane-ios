@@ -375,6 +375,7 @@ struct ChoreFormView: View {
     @State private var original = ChoreFormLogic.State()
     @State private var seeded = false
     @State private var loadFailed: String?
+    @State private var emojiFocused = false
     @State private var saving = false
     @State private var errorMessage: String?
     @State private var confirmingDelete = false
@@ -461,8 +462,12 @@ struct ChoreFormView: View {
         Form {
             Section {
                 // R14 Capped as you type — the spec's maxLength, never a 422.
-                EmojiPickerRow(emoji: FormLimits.capping($state.emoji, FormLimits.emoji))
-                TextField("Title", text: FormLimits.capping($state.title, FormLimits.title))
+                // Well + name in one row, the reward form's look (owner
+                // 2026-08-14 — same everywhere).
+                HStack(spacing: 10) {
+                    EmojiWell(emoji: FormLimits.capping($state.emoji, FormLimits.emoji), focused: $emojiFocused)
+                    TextField("Title", text: FormLimits.capping($state.title, FormLimits.title))
+                }
                 TextField("Notes", text: FormLimits.capping($state.notes, FormLimits.notes))
                 Stepper(value: $state.stars, in: 0...100) {
                     HStack(spacing: 4) {

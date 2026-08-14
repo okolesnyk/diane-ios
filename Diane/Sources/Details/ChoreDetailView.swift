@@ -322,9 +322,17 @@ struct ChoreDetailView: View {
                 case .replace(let fresh):
                     occurrence = fresh
                 case .gone:
-                    alertMessage = "That chore isn't on the board any more."
-                    closeOnAlertDismiss = true
-                    onChanged()  // the list behind us is stale too
+                    // Not in the actionable view is not gone: a FUTURE
+                    // iteration of a done recurring chore lives in the
+                    // WINDOW (owner bug 2026-08-14) — ask its own day
+                    // before closing the sheet on it.
+                    if let fresh = await windowRow() {
+                        occurrence = fresh
+                    } else {
+                        alertMessage = "That chore isn't on the board any more."
+                        closeOnAlertDismiss = true
+                        onChanged()  // the list behind us is stale too
+                    }
                 }
             case .unauthorized:
                 appState.handleUnauthorized()
@@ -335,5 +343,19 @@ struct ChoreDetailView: View {
             // Offline: the snapshot we opened with is still the best we have.
             guard !isTaskCancellation(error) else { return }
         }
+    }
+
+    /// The occurrence's row in the calendar window for its own day — the
+    /// place future previews live. nil when it truly left the board.
+    private func windowRow() async -> Components.Schemas.ChoreOccurrence? {
+        guard let dueDate = occurrence.dueDate else { return nil }
+        guard case .ok(let ok)? = try? await context.client.api.listChoreOccurrences(
+            .init(query: .init(from: dueDate, to: dueDate))
+        ) else { return nil }
+        guard case .replace(let fresh) = ChoreDetailLogic.resync(
+            id: occurrence.id,
+            from: (try? ok.body.json.occurrences) ?? []
+        ) else { return nil }
+        return fresh
     }
 }

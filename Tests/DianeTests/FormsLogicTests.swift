@@ -158,11 +158,11 @@ private func json(_ value: some Encodable) throws -> [String: Any] {
         }
 
         // Text-default emoji wear a VS16 (☀️, 🗑️) and presentation-default
-        // ones don't (🐕, 🐈) — the grid has both, and all of it must pass.
-        @Test func everyCuratedOptionIsAcceptedUnchanged() {
-            for option in EmojiInput.curated {
-                #expect(EmojiInput.accept(option) == option, "curated \(option) was rejected")
-                #expect(option.count == 1, "curated \(option) is not one grapheme")
+        // ones don't (🐕, 🐈) — the keyboard types both, and both must pass.
+        @Test func bothEmojiPresentationFormsAreAcceptedUnchanged() {
+            for option in ["🧹", "🗑️", "♻️", "🐕", "🐈", "🍽️", "✏️", "🛒"] {
+                #expect(EmojiInput.accept(option) == option, "\(option) was rejected")
+                #expect(option.count == 1, "\(option) is not one grapheme")
                 // R14 And each fits the spec's 16 UTF-16 unit cap untouched.
                 #expect(FormLimits.capped(option, FormLimits.emoji) == option)
             }

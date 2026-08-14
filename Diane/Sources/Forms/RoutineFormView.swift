@@ -280,9 +280,9 @@ struct RoutineFormView: View {
     @State private var errorMessage: String?
     @State private var confirmingDelete = false
     @State private var confirmingDiscard = false
-    /// Which task row owns the emoji keyboard / the open grid — one at a time.
+    /// Which task row owns the emoji keyboard — one at a time.
     @State private var focusedTask: UUID?
-    @State private var gridTask: UUID?
+    @State private var emojiFocused = false
 
     private var editedRoutineId: String? {
         if case .edit(let routineId) = mode { return routineId }
@@ -364,8 +364,12 @@ struct RoutineFormView: View {
         Form {
             Section {
                 // R14 Capped as you type — the spec's maxLength, never a 422.
-                EmojiPickerRow(emoji: FormLimits.capping($state.emoji, FormLimits.emoji))
-                TextField("Title", text: FormLimits.capping($state.title, FormLimits.title))
+                // Well + name in one row, the reward form's look (owner
+                // 2026-08-14 — same everywhere).
+                HStack(spacing: 10) {
+                    EmojiWell(emoji: FormLimits.capping($state.emoji, FormLimits.emoji), focused: $emojiFocused)
+                    TextField("Title", text: FormLimits.capping($state.title, FormLimits.title))
+                }
             }
 
             windowSection
@@ -484,8 +488,8 @@ struct RoutineFormView: View {
         let emoji = FormLimits.capping(task.emoji, FormLimits.emoji)
         return VStack(spacing: 6) {
             HStack(spacing: 8) {
-                // Tapping the well raises the emoji keyboard; the chevron opens
-                // the curated grid, which is the way in without that keyboard.
+                // Tapping the well raises the emoji keyboard — the one way in
+                // (owner 2026-08-14, the curated grid went).
                 EmojiWell(
                     emoji: emoji,
                     focused: Binding(
@@ -494,17 +498,6 @@ struct RoutineFormView: View {
                     )
                 )
                 TextField("Task title", text: FormLimits.capping(task.title, FormLimits.title))
-                EmojiGridToggle(expanded: Binding(
-                    get: { gridTask == id },
-                    set: { gridTask = $0 ? id : nil }
-                ))
-            }
-            if gridTask == id {
-                EmojiGridPicker { picked in
-                    emoji.wrappedValue = picked
-                    focusedTask = nil
-                    withAnimation { gridTask = nil }
-                }
             }
             Stepper(value: task.stars, in: 0...100) {
                 Text("★ \(task.stars.wrappedValue)")

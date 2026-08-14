@@ -5,14 +5,6 @@ import UIKit
 
 /// What an emoji field is allowed to hold: exactly one emoji, or nothing.
 enum EmojiInput {
-    /// The curated grid (the web form's set). This path ALWAYS works — the
-    /// emoji keyboard is a Settings toggle the family can switch off.
-    static let curated: [String] = [
-        "🧹", "🧽", "🧼", "🫧", "🛁", "🚽", "🧺", "👕", "🍽️", "🍳",
-        "🥣", "🗑️", "♻️", "🛏️", "🧸", "📚", "🎒", "✏️", "🐕", "🐈",
-        "🪴", "🌻", "💧", "🚿", "🦷", "🧦", "👟", "🚗", "📬", "🛒",
-    ]
-
     /// The value the field should hold after an edit. nil = refuse the edit and
     /// keep what was there; "" = cleared to None.
     /// More than one emoji (a paste, or a second tap on the emoji keyboard)
@@ -50,8 +42,8 @@ extension Character {
 /// A UITextField that asks iOS for the EMOJI keyboard.
 private final class EmojiKeyboardTextField: UITextField {
     /// Public API since iOS 8. nil when the family removed the emoji keyboard
-    /// in Settings — iOS then raises the normal one, which is why the curated
-    /// grid stays reachable.
+    /// in Settings — iOS then raises the normal one, whose emoji key still
+    /// gets there (the curated grid went; owner 2026-08-14, keyboard only).
     override var textInputMode: UITextInputMode? {
         UITextInputMode.activeInputModes.first { $0.primaryLanguage == "emoji" }
     }
@@ -163,80 +155,3 @@ struct EmojiWell: View {
     }
 }
 
-/// Chevron that shows/hides the curated grid.
-struct EmojiGridToggle: View {
-    @Binding var expanded: Bool
-
-    var body: some View {
-        Button {
-            withAnimation { expanded.toggle() }
-        } label: {
-            Image(systemName: "chevron.down")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .rotationEffect(.degrees(expanded ? 180 : 0))
-                .frame(width: 44, height: 44)  // HIG tap target
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.borderless)  // its own tap target inside a list row
-        .accessibilityLabel(expanded ? "Hide emoji list" : "Show emoji list")
-    }
-}
-
-/// The curated grid and None — the way in when there is no emoji keyboard.
-struct EmojiGridPicker: View {
-    let onPick: (String) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 44), spacing: 2)], spacing: 2) {
-                ForEach(EmojiInput.curated, id: \.self) { option in
-                    Button {
-                        onPick(option)
-                    } label: {
-                        Text(option)
-                            .font(.title2)
-                            .frame(width: 44, height: 44)  // HIG tap target
-                    }
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel(option)
-                }
-            }
-            Button("None") { onPick("") }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .frame(minHeight: 44)
-        }
-    }
-}
-
-/// The forms' emoji row: tap it to type one (the emoji keyboard rises), or
-/// open the curated grid.
-struct EmojiPickerRow: View {
-    @Binding var emoji: String
-    @State private var expanded = false
-    @State private var focused = false
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Text("Emoji")
-            Spacer(minLength: 8)
-            EmojiWell(emoji: $emoji, focused: $focused)
-            EmojiGridToggle(expanded: $expanded)
-        }
-        .frame(minHeight: 44)
-        .contentShape(Rectangle())
-        .onTapGesture { focused = true }
-
-        if expanded {
-            EmojiGridPicker { pick($0) }
-                .listRowInsets(FormDensity.rowInsets)
-        }
-    }
-
-    private func pick(_ value: String) {
-        emoji = value
-        focused = false  // drop the keyboard; the grid answered the question
-        withAnimation { expanded = false }
-    }
-}
