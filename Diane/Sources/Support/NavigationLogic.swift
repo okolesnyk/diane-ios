@@ -54,7 +54,7 @@ enum DianeModule: String, CaseIterable, Identifiable, Codable {
 /// Tiles for modules that exist in the design but not yet in the product —
 /// shown grayed in Apps so the family knows where the future lands.
 enum FutureModule: String, CaseIterable, Identifiable {
-    case meals, photos, assistant
+    case meals, photos, budget, assistant
 
     var id: String { rawValue }
 
@@ -62,6 +62,7 @@ enum FutureModule: String, CaseIterable, Identifiable {
         switch self {
         case .meals: "Meals"
         case .photos: "Photos"
+        case .budget: "Budget"
         case .assistant: "Assistant"
         }
     }
@@ -70,6 +71,7 @@ enum FutureModule: String, CaseIterable, Identifiable {
         switch self {
         case .meals: "fork.knife"
         case .photos: "photo.on.rectangle"
+        case .budget: "banknote"
         case .assistant: "sparkles"
         }
     }

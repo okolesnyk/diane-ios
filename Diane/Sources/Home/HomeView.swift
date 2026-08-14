@@ -41,7 +41,6 @@ struct HomeView: View {
     @Environment(SyncSignals.self) private var signals
     @Environment(AppState.self) private var appState
     @Environment(\.dynamicTypeSize) private var typeSize
-    @Environment(\.colorScheme) private var colorScheme
 
     @State private var editing = false
     @State private var snapshot = HomeLogic.Snapshot()
@@ -193,7 +192,6 @@ struct HomeView: View {
     /// header row, one count line pinned at the bottom, red dot top-right
     /// when Chores holds something late. No hard height cap — Dynamic Type
     /// grows the tile (the review's rule).
-    @ViewBuilder
     private func tile(
         title: String,
         systemImage: String,
@@ -203,7 +201,7 @@ struct HomeView: View {
         editing: Bool = false,
         artwork: String? = nil
     ) -> some View {
-        let content = VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 7) {
                 Image(systemName: systemImage)
                     .font(.system(size: 17, weight: .medium))
@@ -229,10 +227,9 @@ struct HomeView: View {
         .frame(maxWidth: .infinity, minHeight: 100, alignment: .topLeading)
         .background {
             if let artwork {
+                // The catalog serves the light or dark render by scheme, so
+                // text keeps its normal dynamic colors on both.
                 Image(artwork).resizable().scaledToFill()
-                    // Dark mode: a scrim tones the light art down so the
-                    // grid doesn't glow on the black page.
-                    .overlay { if colorScheme == .dark { Color.black.opacity(0.25) } }
             } else {
                 Rectangle().fill(.fill.tertiary)
             }
@@ -246,13 +243,6 @@ struct HomeView: View {
         .opacity(comingLater ? 0.55 : 1)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText(title: title, line: line, comingLater: comingLater))
-        if artwork != nil {
-            // The art is a light card in both app themes, so the text keeps
-            // its light-scheme colors — dark-mode white-on-white otherwise.
-            content.environment(\.colorScheme, .light)
-        } else {
-            content
-        }
     }
 
     /// "3 open · 1 late" — the count carries primary weight, the late part
