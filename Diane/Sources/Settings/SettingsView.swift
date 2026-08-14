@@ -245,7 +245,9 @@ struct SettingsView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("Signing back in needs the member password.")
+                Text(context.offline.pending > 0
+                    ? "\(context.offline.pending) unsent offline changes will be discarded. Signing back in needs the member password."
+                    : "Signing back in needs the member password.")
             }
             .task { await loadBalance() }
             .toolbar {

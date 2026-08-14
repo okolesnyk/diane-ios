@@ -71,6 +71,7 @@ struct TodayView: View {
                 )
                 strip
                 chips
+                OfflinePill(center: context.offline)
                 content
             }
             .dianeRootChrome()

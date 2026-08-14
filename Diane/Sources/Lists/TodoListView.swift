@@ -53,6 +53,7 @@ struct TodoListView: View {
                 }
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) { OfflinePill(center: context.offline) }
         .task(id: signals.version(of: [.lists])) { await load() }
         .alert("Reset \(listName)?", isPresented: $confirmingReset) {
             Button("Cancel", role: .cancel) {}

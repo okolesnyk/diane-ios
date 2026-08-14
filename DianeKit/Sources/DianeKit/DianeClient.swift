@@ -17,13 +17,16 @@ public struct DianeClient: Sendable {
     public init(
         origin: URL,
         token: @escaping @Sendable () -> String?,
-        transport: any ClientTransport = URLSessionTransport()
+        transport: any ClientTransport = URLSessionTransport(),
+        offline: OfflineController? = nil
     ) {
         self.origin = origin
+        var middlewares: [any ClientMiddleware] = [BearerAuthMiddleware(token: token)]
+        if let offline { middlewares.append(CacheMiddleware(controller: offline)) }
         self.api = Client(
             serverURL: origin,
             transport: transport,
-            middlewares: [BearerAuthMiddleware(token: token)]
+            middlewares: middlewares
         )
     }
 

@@ -32,6 +32,7 @@ struct ListsView: View {
                 listBody(rows)
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) { OfflinePill(center: context.offline) }
         .task(id: signals.version(of: [.lists])) { await load() }
         .sheet(isPresented: $creating) {
             NewListSheet(context: context) { Task { await load() } }
@@ -173,13 +174,31 @@ struct ListsView: View {
     private func load() async {
         do {
             switch try await context.client.api.listLists(.init()) {
-            case .ok(let ok): lists = .loaded(try ok.body.json.lists)
+            case .ok(let ok):
+                let rows = try ok.body.json.lists
+                lists = .loaded(rows)
+                prefetchForOffline(rows)
             case .unauthorized: appState.handleUnauthorized()
             default: if case .loading = lists { lists = .failed("Couldn\u{2019}t reach your home server.") }
             }
         } catch {
             guard !isTaskCancellation(error) else { return }
             if case .loading = lists { lists = .failed("Couldn\u{2019}t reach your home server.") }
+        }
+    }
+
+    /// Warm the offline cache with EVERY list plus the grocery library, not
+    /// just pages the user happens to visit — the store scenario needs the
+    /// whole module. The cache middleware does the storing; this just makes
+    /// the requests happen.
+    private func prefetchForOffline(_ rows: [Components.Schemas.List]) {
+        let client = context.client
+        Task.detached(priority: .utility) {
+            _ = try? await client.api.listGroceryCategories(.init())
+            _ = try? await client.api.listGroceryLibrary(.init())
+            for list in rows {
+                _ = try? await client.api.getList(.init(path: .init(id: list.id)))
+            }
         }
     }
 

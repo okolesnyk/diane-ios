@@ -30,4 +30,10 @@ final class SyncSignals {
     func version(of topics: Set<DianeTopic>) -> Int {
         epoch * 1_000_000 + topics.reduce(0) { $0 + (counters[$1] ?? 0) }
     }
+
+    /// A locally-sourced change (offline replay drained) — same refetch
+    /// path as a server event, no stream round-trip needed.
+    func bumpLocal(_ topic: DianeTopic) {
+        counters[topic, default: 0] += 1
+    }
 }

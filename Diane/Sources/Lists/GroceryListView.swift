@@ -49,6 +49,7 @@ struct GroceryListView: View {
                 }
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) { OfflinePill(center: context.offline) }
         .navigationTitle(listName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

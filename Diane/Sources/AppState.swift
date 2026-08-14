@@ -6,6 +6,7 @@ import Observation
 struct SignedInContext {
     let client: DianeClient
     let session: StoredSession
+    let offline: OfflineCenter
 }
 
 /// Session lifecycle for the whole app. The iOS app is member-only: family
@@ -71,7 +72,7 @@ final class AppState {
             refreshed.memberRole = member.role.rawValue
             guard refreshed != context.session else { return }
             sessionStore.save(refreshed)
-            phase = .signedIn(SignedInContext(client: context.client, session: refreshed))
+            phase = .signedIn(SignedInContext(client: context.client, session: refreshed, offline: context.offline))
         default:
             break
         }
@@ -103,6 +104,7 @@ final class AppState {
         }
         sessionStore.clear()
         phase = .signedOut
+        context.offline.clear()
         let registrar = pushRegistrar
         Task {
             // Device delete needs the live session, so it goes first.
@@ -116,6 +118,7 @@ final class AppState {
     /// network goodbyes — the token is already dead, and the orphaned device
     /// registration self-heals on the next sign-in (token upsert moves it).
     func handleUnauthorized() {
+        if case .signedIn(let context) = phase { context.offline.clear() }
         pushRegistrar.sessionDidEnd()
         sessionStore.clear()
         phase = .signedOut
@@ -123,7 +126,8 @@ final class AppState {
 
     private func makeContext(for stored: StoredSession) -> SignedInContext {
         let token = stored.token
-        let client = DianeClient(origin: stored.serverURL, token: { token })
-        return SignedInContext(client: client, session: stored)
+        let controller = OfflineController(origin: stored.serverURL, token: { token })
+        let client = DianeClient(origin: stored.serverURL, token: { token }, offline: controller)
+        return SignedInContext(client: client, session: stored, offline: OfflineCenter(controller: controller))
     }
 }

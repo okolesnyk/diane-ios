@@ -113,6 +113,9 @@ struct RootTabView: View {
         .task(id: scenePhase == .background) {
             guard scenePhase != .background else { return }
             appState.pushRegistrar.retryIfNeeded()
+            // Queued offline changes get their chance the moment we're back.
+            context.offline.onDrained = { signals.bumpLocal(.lists) }
+            context.offline.kickReplay()
             let token = context.session.token
             for await signal in sse.signals(
                 url: context.client.streamURL,
