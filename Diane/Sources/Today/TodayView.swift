@@ -12,6 +12,9 @@ struct TodayView: View {
     @Environment(AppState.self) private var appState
     @Environment(SyncSignals.self) private var signals
     @Environment(HouseholdClock.self) private var clock
+    @AppStorage("timeFormat") private var timeFormat = "system"
+
+    private var use24: Bool { DisplayPrefs.uses24Hour(timeFormat) }
 
     @State private var selectedDate: String?
     @State private var path = NavigationPath()
@@ -372,7 +375,7 @@ struct TodayView: View {
             timeZone: clock.timeZone
         ))
         return HStack(spacing: 10) {
-            timeCol(event.allDay ? "all day" : event.startsAt.flatMap { TimeLogic.timeLabel($0, timeZone: clock.timeZone) } ?? "")
+            timeCol(event.allDay ? "all day" : event.startsAt.flatMap { TimeLogic.timeLabel($0, timeZone: clock.timeZone, use24: use24) } ?? "")
             RoundedRectangle(cornerRadius: 2)
                 .fill(Color(hex: DayLogic.railColorHex(for: event, calendars: loaded.calendars) ?? "#34c759"))
                 .frame(width: 4)
@@ -408,7 +411,7 @@ struct TodayView: View {
             if late {
                 timeCol("late", red: true)
             } else if let time = row.dueTime {
-                Text(time)
+                Text(ClockDisplay.label(time, use24: use24))
                     .font(.caption.weight(.medium))
                     .monospacedDigit()
                     .lineLimit(1)
@@ -435,14 +438,14 @@ struct TodayView: View {
                         // No pool caption any more (owner 2026-08-10:
                         // "Anyone can take it" was noise) — the dashed
                         // circle says it; pool rows caption like the rest.
-                        if let note = ChoresPageLogic.subtitle(row, today: clock.today, names: memberNames),
+                        if let note = ChoresPageLogic.subtitle(row, today: clock.today, names: memberNames, use24: use24),
                            row.completed {
                             Text(note).font(.caption).foregroundStyle(.secondary)
                         } else if dayCaption {
                             Text(NavigationLogic.dayTitle(for: day))
                                 .font(.caption).foregroundStyle(.secondary)
                         } else if let due = row.dueDate, due != day,
-                                  let origin = DayLogic.dueOrigin(row.lead, today: clock.today) {
+                                  let origin = DayLogic.dueOrigin(row.lead, today: clock.today, use24: use24) {
                             // An off-day row wears its origin ("due
                             // yesterday" in Catch Up), owner 2026-08-10.
                             Text(origin).font(.caption).foregroundStyle(.secondary)
@@ -703,7 +706,7 @@ struct TodayView: View {
         total: Int,
         complete: Bool
     ) -> String {
-        let window = "\(entry.windowStart)–\(entry.windowEnd)"
+        let window = ClockDisplay.range(entry.windowStart, entry.windowEnd, use24: use24)
         return complete ? "\(window) · Done for today ✓" : "\(window) · \(done) of \(total)"
     }
 
@@ -782,10 +785,11 @@ struct GhostLabel: View {
 /// The hairline now-line as a zero-height list row (shared by the day pages).
 struct NowLineRow: View {
     let minute: String
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(minute)
+            Text(ClockDisplay.label(minute, use24: DisplayPrefs.uses24Hour(timeFormat)))
                 .font(.system(size: 10, weight: .bold))
                 .foregroundStyle(.red)
                 .monospacedDigit()

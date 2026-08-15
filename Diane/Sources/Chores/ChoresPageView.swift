@@ -15,6 +15,7 @@ struct ChoresPageView: View {
     @Environment(SyncSignals.self) private var signals
     @Environment(HouseholdClock.self) private var clock
     @Environment(MemberFilterStore.self) private var filter
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     @State private var tab = ChoresPageView.launchTab
     @State private var data: Loadable<PageData> = .loading
@@ -323,7 +324,7 @@ struct ChoresPageView: View {
                                 .strikethrough(row.completed, color: .secondary)
                                 .foregroundStyle(row.completed ? Color.secondary : Color.primary)
                         }
-                        if let sub = ChoresPageLogic.subtitle(row, today: clock.today, names: memberNames) {
+                        if let sub = ChoresPageLogic.subtitle(row, today: clock.today, names: memberNames, use24: DisplayPrefs.uses24Hour(timeFormat)) {
                             Text(sub)
                                 .font(.caption)
                                 .foregroundStyle(row.late ? Color.red : Color.secondary)

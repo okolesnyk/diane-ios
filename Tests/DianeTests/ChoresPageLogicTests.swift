@@ -326,15 +326,15 @@ struct ChoresPageLogicTests {
         let deadline = ChoresPageLogic.rows([
             occ(id: "g", choreId: "garage", dueDate: "2026-08-15", dueMode: .by),
         ])[0]
-        #expect(ChoresPageLogic.subtitle(deadline, today: today, names: [:]) == "By Aug 15")
+        #expect(ChoresPageLogic.subtitle(deadline, today: today, names: [:], use24: true) == "By Aug 15")
 
         let late = ChoresPageLogic.rows([
             occ(id: "k", choreId: "kit", dueDate: "2026-08-05", late: true, assignee: sib),
         ])[0]
-        #expect(ChoresPageLogic.subtitle(late, today: today, names: [:]) == "Due Wed, Aug 5")
+        #expect(ChoresPageLogic.subtitle(late, today: today, names: [:], use24: true) == "Due Wed, Aug 5")
 
         let shelf = ChoresPageLogic.rows([occ(id: "w", choreId: "windows")])[0]
-        #expect(ChoresPageLogic.subtitle(shelf, today: today, names: [:]) == nil)
+        #expect(ChoresPageLogic.subtitle(shelf, today: today, names: [:], use24: true) == nil)
     }
 
     /// D06's rule, kept: a done row names the helper only when it wasn't the
@@ -344,12 +344,12 @@ struct ChoresPageLogicTests {
         let ownWork = ChoresPageLogic.rows([
             occ(id: "a", choreId: "cat", dueDate: today, status: .completed, assignee: kid, completedBy: kid),
         ])[0]
-        #expect(ChoresPageLogic.subtitle(ownWork, today: today, names: names) == nil)
+        #expect(ChoresPageLogic.subtitle(ownWork, today: today, names: names, use24: true) == nil)
 
         let helped = ChoresPageLogic.rows([
             occ(id: "b", choreId: "cat", dueDate: today, status: .completed, assignee: kid, completedBy: me),
         ])[0]
-        #expect(ChoresPageLogic.subtitle(helped, today: today, names: names) == "done by Alex")
+        #expect(ChoresPageLogic.subtitle(helped, today: today, names: names, use24: true) == "done by Alex")
     }
 
     @Test func crossMemberUnchecksConfirmAndNameTheCost() {

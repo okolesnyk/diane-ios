@@ -44,17 +44,17 @@ import Testing
 
     @Test func subLinesFollowTheMockGrammar() {
         let live = entry(windowStart: "15:30", windowEnd: "17:30", open: 2, done: 1)
-        #expect(RoutinesPageLogic.sub(live, phase: .now).text == "Until 17:30 · 1 of 3")
+        #expect(RoutinesPageLogic.sub(live, phase: .now, use24: true).text == "Until 17:30 · 1 of 3")
         let liveDone = entry(windowStart: "15:30", windowEnd: "17:30", done: 2, skipped: 1)
-        let doneSub = RoutinesPageLogic.sub(liveDone, phase: .now)
+        let doneSub = RoutinesPageLogic.sub(liveDone, phase: .now, use24: true)
         #expect(doneSub.text == "Done for today ✓" && doneSub.done)
         let later = entry(windowStart: "19:00", windowEnd: "20:30", open: 3)
-        #expect(RoutinesPageLogic.sub(later, phase: .laterToday).text == "19:00–20:30")
+        #expect(RoutinesPageLogic.sub(later, phase: .laterToday, use24: true).text == "19:00–20:30")
         let earlier = entry(open: 1, done: 3)
-        let earlierSub = RoutinesPageLogic.sub(earlier, phase: .earlier)
+        let earlierSub = RoutinesPageLogic.sub(earlier, phase: .earlier, use24: true)
         #expect(earlierSub.text == "3 of 4" && earlierSub.stillOpen == 1)
         let empty = entry()
-        #expect(RoutinesPageLogic.sub(empty, phase: .now).text.contains("No tasks yet"))
+        #expect(RoutinesPageLogic.sub(empty, phase: .now, use24: true).text.contains("No tasks yet"))
     }
 
     @Test func displayedStreakAddsTodayOnlyWhenTrulyComplete() {

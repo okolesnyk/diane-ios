@@ -98,6 +98,7 @@ struct RewardsView: View {
     @Environment(HouseholdClock.self) private var clock
     @Environment(MemberFilterStore.self) private var filter
     @Environment(\.dynamicTypeSize) private var typeSize
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     @State private var data: Loadable<RewardsData> = .loading
     @State private var segment: Segment = .store
@@ -540,13 +541,16 @@ struct RewardsView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// "Aug 10 · 18:05" in the household's zone.
+    /// "Aug 10 · 18:05" / "Aug 10 · 6:05 PM" in the household's zone.
     private func whenLabel(_ instant: String?) -> String {
         guard let instant, let date = RewardsLogic.instant(instant) else { return "" }
         let formatter = DateFormatter()
         formatter.timeZone = clock.timeZone
-        formatter.setLocalizedDateFormatFromTemplate("MMM d HH:mm")
-        return formatter.string(from: date)
+        formatter.setLocalizedDateFormatFromTemplate("MMM d")
+        let time = ClockDisplay.time(
+            date, timeZone: clock.timeZone, use24: DisplayPrefs.uses24Hour(timeFormat)
+        )
+        return "\(formatter.string(from: date)) · \(time)"
     }
 
     // MARK: Data

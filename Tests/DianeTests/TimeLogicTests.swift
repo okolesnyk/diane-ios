@@ -31,15 +31,15 @@ import Testing
     }
 
     @Test func timeLabelRendersTheInstantInLocalTime() {
-        #expect(TimeLogic.timeLabel("2026-07-27T18:30:00Z", timeZone: newYork) == "14:30")
-        #expect(TimeLogic.timeLabel(nil, timeZone: newYork) == nil)
-        #expect(TimeLogic.timeLabel("not-a-date", timeZone: newYork) == nil)
+        #expect(TimeLogic.timeLabel("2026-07-27T18:30:00Z", timeZone: newYork, use24: true) == "14:30")
+        #expect(TimeLogic.timeLabel(nil, timeZone: newYork, use24: true) == nil)
+        #expect(TimeLogic.timeLabel("not-a-date", timeZone: newYork, use24: true) == nil)
     }
 
     // The api emits fractional seconds; the default ISO8601 parser rejects
     // them, which rendered every event time as "—" (caught live in M9).
     @Test func timeLabelAcceptsFractionalSeconds() {
-        #expect(TimeLogic.timeLabel("2026-07-27T22:00:00.000Z", timeZone: newYork) == "18:00")
+        #expect(TimeLogic.timeLabel("2026-07-27T22:00:00.000Z", timeZone: newYork, use24: true) == "18:00")
     }
 
     @Test func minutesParsesTheWallClockAndRejectsGarbage() {

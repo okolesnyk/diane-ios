@@ -132,6 +132,11 @@ struct RootTabView: View {
         }
         // The household's wall clock drives every "today"/window decision.
         .task { await clock.run(client: context.client) }
+        // Account display prefs: pull on appear and whenever members change
+        // (a pick on any other client lands here live).
+        .task(id: signals.version(of: [.members])) {
+            await DisplayPrefsSync.pull(context: context)
+        }
         #if DEBUG
         // Diagnostic dump for screenshot sessions (simctl cannot tap).
         .task {

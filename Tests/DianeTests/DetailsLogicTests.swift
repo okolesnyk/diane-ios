@@ -23,7 +23,7 @@ import Testing
         @Test func timedSameDay() {
             let line = EventDetailLogic.whenLine(
                 for: timed("2026-07-27T15:00:00Z", "2026-07-27T16:00:00Z"),
-                timeZone: DetailsLogicTests.berlin
+                timeZone: DetailsLogicTests.berlin, use24: true
             )
             #expect(line == "17:00–18:00 · Mon, Jul 27")
         }
@@ -31,7 +31,7 @@ import Testing
         @Test func timedUsesHouseholdZoneNotUTC() {
             let line = EventDetailLogic.whenLine(
                 for: timed("2026-07-27T15:00:00Z", "2026-07-27T16:00:00Z"),
-                timeZone: DetailsLogicTests.newYork
+                timeZone: DetailsLogicTests.newYork, use24: true
             )
             #expect(line == "11:00–12:00 · Mon, Jul 27")
         }
@@ -40,7 +40,7 @@ import Testing
         @Test func timedZoneShiftsTheDayLabel() {
             let line = EventDetailLogic.whenLine(
                 for: timed("2026-07-27T22:30:00Z", "2026-07-27T23:00:00Z"),
-                timeZone: DetailsLogicTests.berlin
+                timeZone: DetailsLogicTests.berlin, use24: true
             )
             #expect(line == "00:30–01:00 · Tue, Jul 28")
         }
@@ -48,7 +48,7 @@ import Testing
         @Test func timedCrossDayShowsBothDays() {
             let line = EventDetailLogic.whenLine(
                 for: timed("2026-07-27T21:30:00Z", "2026-07-28T07:00:00Z"),
-                timeZone: DetailsLogicTests.berlin
+                timeZone: DetailsLogicTests.berlin, use24: true
             )
             #expect(line == "Mon, Jul 27 23:30 – Tue, Jul 28 09:00")
         }
@@ -56,7 +56,7 @@ import Testing
         @Test func timedWithoutEnd() {
             let line = EventDetailLogic.whenLine(
                 for: timed("2026-07-27T15:00:00Z", nil),
-                timeZone: DetailsLogicTests.berlin
+                timeZone: DetailsLogicTests.berlin, use24: true
             )
             #expect(line == "17:00 · Mon, Jul 27")
         }
@@ -64,40 +64,40 @@ import Testing
         @Test func timedFractionalSecondsParse() {
             let line = EventDetailLogic.whenLine(
                 for: timed("2026-07-27T15:00:00.000Z", "2026-07-27T16:00:00.000Z"),
-                timeZone: DetailsLogicTests.berlin
+                timeZone: DetailsLogicTests.berlin, use24: true
             )
             #expect(line == "17:00–18:00 · Mon, Jul 27")
         }
 
         @Test func timedWithoutStartIsEmpty() {
-            #expect(EventDetailLogic.whenLine(for: timed(nil, nil), timeZone: DetailsLogicTests.berlin) == "")
+            #expect(EventDetailLogic.whenLine(for: timed(nil, nil), timeZone: DetailsLogicTests.berlin, use24: true) == "")
         }
 
         // Wire endDate is END-EXCLUSIVE: [Jul 27, Jul 28) is a single day.
         @Test func allDaySingleFromExclusiveEnd() {
-            let line = EventDetailLogic.whenLine(for: allDay("2026-07-27", "2026-07-28"), timeZone: DetailsLogicTests.berlin)
+            let line = EventDetailLogic.whenLine(for: allDay("2026-07-27", "2026-07-28"), timeZone: DetailsLogicTests.berlin, use24: true)
             #expect(line == "All day · Mon, Jul 27")
         }
 
         @Test func allDaySingleWithoutEnd() {
-            let line = EventDetailLogic.whenLine(for: allDay("2026-07-27", nil), timeZone: DetailsLogicTests.berlin)
+            let line = EventDetailLogic.whenLine(for: allDay("2026-07-27", nil), timeZone: DetailsLogicTests.berlin, use24: true)
             #expect(line == "All day · Mon, Jul 27")
         }
 
         // [Jul 27, Jul 30) reads as the human range Jul 27 – Jul 29.
         @Test func allDayRangeShownInclusive() {
-            let line = EventDetailLogic.whenLine(for: allDay("2026-07-27", "2026-07-30"), timeZone: DetailsLogicTests.berlin)
+            let line = EventDetailLogic.whenLine(for: allDay("2026-07-27", "2026-07-30"), timeZone: DetailsLogicTests.berlin, use24: true)
             #expect(line == "All day · Mon, Jul 27 – Wed, Jul 29")
         }
 
         @Test func allDayRangeCrossesMonths() {
-            let line = EventDetailLogic.whenLine(for: allDay("2026-07-30", "2026-08-02"), timeZone: DetailsLogicTests.berlin)
+            let line = EventDetailLogic.whenLine(for: allDay("2026-07-30", "2026-08-02"), timeZone: DetailsLogicTests.berlin, use24: true)
             #expect(line == "All day · Thu, Jul 30 – Sat, Aug 1")
         }
 
         // Degenerate wire shape (end == start) must not render a backwards range.
         @Test func allDayDegenerateEndEqualsStart() {
-            let line = EventDetailLogic.whenLine(for: allDay("2026-07-27", "2026-07-27"), timeZone: DetailsLogicTests.berlin)
+            let line = EventDetailLogic.whenLine(for: allDay("2026-07-27", "2026-07-27"), timeZone: DetailsLogicTests.berlin, use24: true)
             #expect(line == "All day · Mon, Jul 27")
         }
     }
@@ -300,63 +300,63 @@ import Testing
 
         @Test func doneLineFull() {
             let line = ChoreDetailLogic.doneLine(
-                byName: "Ann", completedAt: "2026-07-27T15:42:00Z", timeZone: DetailsLogicTests.berlin
+                byName: "Ann", completedAt: "2026-07-27T15:42:00Z", timeZone: DetailsLogicTests.berlin, use24: true
             )
             #expect(line == "Done ✓ by Ann · 17:42")
         }
 
         @Test func doneLineTimeInHouseholdZone() {
             let line = ChoreDetailLogic.doneLine(
-                byName: "Ann", completedAt: "2026-07-27T15:42:00Z", timeZone: DetailsLogicTests.newYork
+                byName: "Ann", completedAt: "2026-07-27T15:42:00Z", timeZone: DetailsLogicTests.newYork, use24: true
             )
             #expect(line == "Done ✓ by Ann · 11:42")
         }
 
         @Test func doneLineWithoutName() {
             let line = ChoreDetailLogic.doneLine(
-                byName: nil, completedAt: "2026-07-27T15:42:00.500Z", timeZone: DetailsLogicTests.berlin
+                byName: nil, completedAt: "2026-07-27T15:42:00.500Z", timeZone: DetailsLogicTests.berlin, use24: true
             )
             #expect(line == "Done ✓ · 17:42")
         }
 
         @Test func doneLineUnparseableInstantDropsTime() {
-            #expect(ChoreDetailLogic.doneLine(byName: "Ann", completedAt: "yesterday", timeZone: DetailsLogicTests.berlin) == "Done ✓ by Ann")
+            #expect(ChoreDetailLogic.doneLine(byName: "Ann", completedAt: "yesterday", timeZone: DetailsLogicTests.berlin, use24: true) == "Done ✓ by Ann")
         }
 
         @Test func doneLineBare() {
-            #expect(ChoreDetailLogic.doneLine(byName: nil, completedAt: nil, timeZone: DetailsLogicTests.berlin) == "Done ✓")
+            #expect(ChoreDetailLogic.doneLine(byName: nil, completedAt: nil, timeZone: DetailsLogicTests.berlin, use24: true) == "Done ✓")
         }
 
         private let today = "2026-07-27"
 
         @Test func scheduleAnytime() {
-            #expect(ChoreDetailLogic.scheduleLine(dueDate: nil, dueMode: nil, dueTime: nil, today: today) == "Anytime")
+            #expect(ChoreDetailLogic.scheduleLine(dueDate: nil, dueMode: nil, dueTime: nil, today: today, use24: true) == "Anytime")
         }
 
         @Test func scheduleDueTodayWithTime() {
             #expect(
-                ChoreDetailLogic.scheduleLine(dueDate: "2026-07-27", dueMode: .on, dueTime: "18:00", today: today)
+                ChoreDetailLogic.scheduleLine(dueDate: "2026-07-27", dueMode: .on, dueTime: "18:00", today: today, use24: true)
                     == "Due today at 18:00"
             )
         }
 
         @Test func scheduleDueTodayBare() {
             #expect(
-                ChoreDetailLogic.scheduleLine(dueDate: "2026-07-27", dueMode: nil, dueTime: nil, today: today)
+                ChoreDetailLogic.scheduleLine(dueDate: "2026-07-27", dueMode: nil, dueTime: nil, today: today, use24: true)
                     == "Due today"
             )
         }
 
         @Test func scheduleFutureDate() {
             #expect(
-                ChoreDetailLogic.scheduleLine(dueDate: "2026-08-15", dueMode: .on, dueTime: nil, today: today)
+                ChoreDetailLogic.scheduleLine(dueDate: "2026-08-15", dueMode: .on, dueTime: nil, today: today, use24: true)
                     == "Due Aug 15, 2026"
             )
         }
 
         @Test func schedulePastDateKeepsTheDate() {
             #expect(
-                ChoreDetailLogic.scheduleLine(dueDate: "2026-07-20", dueMode: nil, dueTime: "18:00", today: today)
+                ChoreDetailLogic.scheduleLine(dueDate: "2026-07-20", dueMode: nil, dueTime: "18:00", today: today, use24: true)
                     == "Due Jul 20, 2026 at 18:00"
             )
         }
@@ -364,11 +364,11 @@ import Testing
         // "By a date" reads as a deadline even when it lands today.
         @Test func scheduleByDeadline() {
             #expect(
-                ChoreDetailLogic.scheduleLine(dueDate: "2026-08-15", dueMode: .by, dueTime: nil, today: today)
+                ChoreDetailLogic.scheduleLine(dueDate: "2026-08-15", dueMode: .by, dueTime: nil, today: today, use24: true)
                     == "By Aug 15, 2026"
             )
             #expect(
-                ChoreDetailLogic.scheduleLine(dueDate: "2026-07-27", dueMode: .by, dueTime: "18:00", today: today)
+                ChoreDetailLogic.scheduleLine(dueDate: "2026-07-27", dueMode: .by, dueTime: "18:00", today: today, use24: true)
                     == "By Jul 27, 2026 at 18:00"
             )
         }
@@ -430,7 +430,7 @@ import Testing
             #expect(ChoreDetailLogic.status(of: row) == .done)
             #expect(
                 ChoreDetailLogic.doneLine(
-                    byName: "Ann", completedAt: row.completedAt, timeZone: DetailsLogicTests.berlin
+                    byName: "Ann", completedAt: row.completedAt, timeZone: DetailsLogicTests.berlin, use24: true
                 ) == "Done ✓ by Ann · 17:42"
             )
         }
@@ -480,7 +480,8 @@ import Testing
             timeZone: TimeZone = DetailsLogicTests.berlin
         ) -> String? {
             RoutineDetailLogic.taskAttribution(
-                status: status, byName: byName, isMe: isMe, completedAt: completedAt, timeZone: timeZone
+                status: status, byName: byName, isMe: isMe, completedAt: completedAt,
+                timeZone: timeZone, use24: true
             )
         }
 

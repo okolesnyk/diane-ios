@@ -30,21 +30,26 @@ enum EventDetailLogic {
     /// "17:00–18:00 · Mon, Jul 27", "All day · Mon, Jul 27", an all-day range
     /// shown human-INCLUSIVE (the wire endDate is end-exclusive), or a
     /// cross-day timed range ("Mon, Jul 27 23:30 – Tue, Jul 28 09:00").
-    static func whenLine(for occurrence: Occurrence, timeZone: TimeZone) -> String {
+    static func whenLine(for occurrence: Occurrence, timeZone: TimeZone, use24: Bool) -> String {
         if occurrence.allDay {
             return allDayLine(startDate: occurrence.startDate, endDate: occurrence.endDate)
         }
         guard let startsAt = occurrence.startsAt, let start = parseInstant(startsAt) else { return "" }
         let day = formatter("EEE, MMM d", timeZone)
-        let time = formatter("HH:mm", timeZone)
+        let startTime = ClockDisplay.time(start, timeZone: timeZone, use24: use24)
         guard let endsAt = occurrence.endsAt, let end = parseInstant(endsAt) else {
-            return "\(time.string(from: start)) · \(day.string(from: start))"
+            return "\(startTime) · \(day.string(from: start))"
         }
         let ymd = formatter("yyyy-MM-dd", timeZone)
+        let wire = formatter("HH:mm", timeZone)
         if ymd.string(from: start) == ymd.string(from: end) {
-            return "\(time.string(from: start))–\(time.string(from: end)) · \(day.string(from: start))"
+            let range = ClockDisplay.range(
+                wire.string(from: start), wire.string(from: end), use24: use24
+            )
+            return "\(range) · \(day.string(from: start))"
         }
-        return "\(day.string(from: start)) \(time.string(from: start)) – \(day.string(from: end)) \(time.string(from: end))"
+        let endTime = ClockDisplay.time(end, timeZone: timeZone, use24: use24)
+        return "\(day.string(from: start)) \(startTime) – \(day.string(from: end)) \(endTime)"
     }
 
     /// Humanized recurrence: "Repeats every 2 weeks on Mo, We · until Aug 30".
@@ -152,6 +157,7 @@ struct EventDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
     @Environment(HouseholdClock.self) private var clock
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     @State private var calendars: Loadable<[Components.Schemas.Calendar]> = .loading
     @State private var selectedMemberIds: Set<String>
@@ -294,7 +300,10 @@ struct EventDetailView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(occurrence.summary)
                     .font(.system(.title2, design: .rounded, weight: .bold))
-                Text(EventDetailLogic.whenLine(for: occurrence, timeZone: clock.timeZone))
+                Text(EventDetailLogic.whenLine(
+                    for: occurrence, timeZone: clock.timeZone,
+                    use24: DisplayPrefs.uses24Hour(timeFormat)
+                ))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()

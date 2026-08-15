@@ -30,11 +30,12 @@ enum RoutineDetailLogic {
         byName: String?,
         isMe: Bool,
         completedAt: String?,
-        timeZone: TimeZone
+        timeZone: TimeZone,
+        use24: Bool
     ) -> String? {
         guard status != .open else { return nil }
         let who = isMe ? "you" : byName
-        let time = clockTime(completedAt, timeZone: timeZone)
+        let time = clockTime(completedAt, timeZone: timeZone, use24: use24)
         let credit: String? =
             switch (who, time) {
             case (let who?, let time?): "by \(who) · \(time)"
@@ -46,14 +47,10 @@ enum RoutineDetailLogic {
         return credit.map { "Skipped \($0)" } ?? "Skipped"
     }
 
-    /// "HH:mm" in the household zone; nil when absent or unparseable.
-    private static func clockTime(_ instant: String?, timeZone: TimeZone) -> String? {
+    /// Wall clock in the household zone; nil when absent or unparseable.
+    private static func clockTime(_ instant: String?, timeZone: TimeZone, use24: Bool) -> String? {
         guard let instant, let date = parseInstant(instant) else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
+        return ClockDisplay.time(date, timeZone: timeZone, use24: use24)
     }
 
     private static func parseInstant(_ instant: String) -> Date? {
@@ -86,6 +83,7 @@ struct RoutineDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
     @Environment(HouseholdClock.self) private var clock
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     @State private var routines: Loadable<[Components.Schemas.Routine]> = .loading
     @State private var busyTaskIds: Set<String> = []
@@ -219,7 +217,10 @@ struct RoutineDetailView: View {
     /// "06:00–12:00 · Now" — phase against the household minute; the phase
     /// tag is meaningless on a stale board, so it drops there.
     private var windowLine: some View {
-        var line = "\(entry.windowStart)–\(entry.windowEnd)"
+        var line = ClockDisplay.range(
+            entry.windowStart, entry.windowEnd,
+            use24: DisplayPrefs.uses24Hour(timeFormat)
+        )
         if !isStale {
             let phase = RoutinesBoardLogic.phase(
                 windowStart: entry.windowStart,
@@ -266,7 +267,8 @@ struct RoutineDetailView: View {
                     byName: task.completedByMemberId.flatMap { membersByID[$0]?.name },
                     isMe: task.completedByMemberId == context.session.memberID,
                     completedAt: task.completedAt,
-                    timeZone: clock.timeZone
+                    timeZone: clock.timeZone,
+                    use24: DisplayPrefs.uses24Hour(timeFormat)
                 ) {
                     Text(attribution)
                         .font(.caption2)

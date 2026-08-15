@@ -135,7 +135,7 @@ import Testing
         // The "Now" pill says the phase, so the caption doesn't repeat it.
         @Test func nowPhaseShowsWindowOnly() {
             #expect(
-                RoutinesBoardLogic.headerCaption(windowStart: "06:00", windowEnd: "12:00", phase: .now)
+                RoutinesBoardLogic.headerCaption(windowStart: "06:00", windowEnd: "12:00", phase: .now, use24: true)
                     == "06:00–12:00"
             )
         }
@@ -143,11 +143,11 @@ import Testing
         // Off-phase routines keep the wording the old phase headings carried.
         @Test func otherPhasesAppendTheirTitle() {
             #expect(
-                RoutinesBoardLogic.headerCaption(windowStart: "18:00", windowEnd: "23:59", phase: .laterToday)
+                RoutinesBoardLogic.headerCaption(windowStart: "18:00", windowEnd: "23:59", phase: .laterToday, use24: true)
                     == "18:00–23:59 · Later today"
             )
             #expect(
-                RoutinesBoardLogic.headerCaption(windowStart: "06:00", windowEnd: "08:00", phase: .earlier)
+                RoutinesBoardLogic.headerCaption(windowStart: "06:00", windowEnd: "08:00", phase: .earlier, use24: true)
                     == "06:00–08:00 · Earlier"
             )
         }
@@ -329,14 +329,14 @@ import Testing
 
         @Test func subtitleShowsWindowAndAssigneeCount() {
             #expect(
-                RoutinesManageLogic.subtitle(windowStart: "06:00", windowEnd: "12:00", assigneeCount: 2)
+                RoutinesManageLogic.subtitle(windowStart: "06:00", windowEnd: "12:00", assigneeCount: 2, use24: true)
                     == "06:00–12:00 · 2 members"
             )
         }
 
         @Test func singleAssigneeIsSingular() {
             #expect(
-                RoutinesManageLogic.subtitle(windowStart: "18:00", windowEnd: "23:59", assigneeCount: 1)
+                RoutinesManageLogic.subtitle(windowStart: "18:00", windowEnd: "23:59", assigneeCount: 1, use24: true)
                     == "18:00–23:59 · 1 member"
             )
         }

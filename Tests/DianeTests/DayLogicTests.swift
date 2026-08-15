@@ -90,15 +90,15 @@ import DianeKit
     /// alone could be next year's.
     @Test func dueOriginNamesTheYearWhenItDiffers() {
         let nextYear = chore(id: "ny", dueDate: "2027-08-11")
-        #expect(DayLogic.dueOrigin(nextYear, today: "2026-08-10") == "Due Wed, Aug 11, 2027")
+        #expect(DayLogic.dueOrigin(nextYear, today: "2026-08-10", use24: true) == "Due Wed, Aug 11, 2027")
         let sameYear = chore(id: "sy", dueDate: "2026-08-15")
-        #expect(DayLogic.dueOrigin(sameYear, today: "2026-08-10") == "Due Sat, Aug 15")
+        #expect(DayLogic.dueOrigin(sameYear, today: "2026-08-10", use24: true) == "Due Sat, Aug 15")
         // Real dates, never "yesterday" (owner 2026-08-10); today stays
         // "Due today", and a time rides along.
         let yesterday = chore(id: "yd", dueDate: "2026-08-09", dueTime: "16:00")
-        #expect(DayLogic.dueOrigin(yesterday, today: "2026-08-10") == "Due Sun, Aug 9 16:00")
+        #expect(DayLogic.dueOrigin(yesterday, today: "2026-08-10", use24: true) == "Due Sun, Aug 9 16:00")
         let today = chore(id: "td", dueDate: "2026-08-10")
-        #expect(DayLogic.dueOrigin(today, today: "2026-08-10") == "Due today")
+        #expect(DayLogic.dueOrigin(today, today: "2026-08-10", use24: true) == "Due today")
     }
 
     /// Owner 2026-08-09: a checked late chore reads as a truthful late-done

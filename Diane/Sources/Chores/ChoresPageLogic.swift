@@ -281,7 +281,7 @@ enum ChoresPageLogic {
 
     /// The plain-words sub under the title. Never the owner's name — the
     /// facepile already says who (rev 6 row anatomy).
-    static func subtitle(_ row: Row, today: String, names: [String: String]) -> String? {
+    static func subtitle(_ row: Row, today: String, names: [String: String], use24: Bool) -> String? {
         if row.completed {
             guard let completer = row.occurrences.compactMap(\.completedByMemberId).first,
                   !row.owners.contains(completer),
@@ -293,7 +293,7 @@ enum ChoresPageLogic {
         // 2026-08-10 — the two Catch ups disagreed): "Due yesterday 16:00",
         // "Due Thu, Jun 18"; the red lane already says late.
         if row.late {
-            return DayLogic.dueOrigin(row.lead, today: today)
+            return DayLogic.dueOrigin(row.lead, today: today, use24: use24)
         }
         // Just the date (owner 2026-08-10 — "flexible until then" was noise).
         if row.dueMode == .by, let due = row.dueDate {
@@ -301,7 +301,7 @@ enum ChoresPageLogic {
         }
         // Undated rows carry no sub — the Anytime lane already says it
         // (owner 2026-08-10).
-        return row.dueTime
+        return row.dueTime.map { ClockDisplay.label($0, use24: use24) }
     }
 
     /// The cross-member un-check confirm (owner approved): un-checking your

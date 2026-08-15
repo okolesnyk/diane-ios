@@ -68,6 +68,14 @@ struct MemberReminderPatch: Encodable, Sendable {
     }
 }
 
+/// PATCH /members/:id for the account display prefs. Synthesized encoding
+/// omits nil (= keep), which is exactly right here — the two picks save
+/// independently.
+struct DisplayPrefsPatch: Encodable, Sendable {
+    var weekStart: String?
+    var timeFormat: String?
+}
+
 // MARK: - Screen
 
 /// M9c density: the same 16pt gutter every list in the app uses.
@@ -95,6 +103,7 @@ struct SettingsView: View {
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage("memberTint") private var tintOn = true
     @AppStorage("weekStart") private var weekStart = "system"
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     var body: some View {
         Group {
@@ -106,6 +115,24 @@ struct SettingsView: View {
         }
         .task { await loadReminder() }
         .onChange(of: draft) { _, value in scheduleSave(value) }
+        // Week-start and time-format are ACCOUNT prefs (owner 2026-08-15):
+        // the pick applies here instantly via @AppStorage and rides to the
+        // member row so every signed-in client follows. DisplayPrefsSync
+        // pulls the same keys back on members-changed.
+        .onChange(of: weekStart) { _, value in
+            Task { await saveDisplayPref(DisplayPrefsPatch(weekStart: value)) }
+        }
+        .onChange(of: timeFormat) { _, value in
+            Task { await saveDisplayPref(DisplayPrefsPatch(timeFormat: value)) }
+        }
+    }
+
+    private func saveDisplayPref(_ patch: DisplayPrefsPatch) async {
+        _ = try? await FormPatch.send(
+            patch,
+            path: "api/v1/members/\(context.session.memberID)",
+            context: context
+        )
     }
 
     /// M9e-8 (mock page 7): hero + balance, My preferences, Household
@@ -176,6 +203,12 @@ struct SettingsView: View {
                         Text("System").tag("system")
                         Text("Sunday").tag("sunday")
                         Text("Monday").tag("monday")
+                    }
+                    .listRowInsets(settingsRowInsets)
+                    Picker("Time format", selection: $timeFormat) {
+                        Text("System").tag("system")
+                        Text("12-hour").tag("12h")
+                        Text("24-hour").tag("24h")
                     }
                     .listRowInsets(settingsRowInsets)
                 } header: {
@@ -290,6 +323,7 @@ struct SettingsView: View {
                     displayedComponents: .hourAndMinute
                 )
                 .environment(\.timeZone, clock.timeZone)
+                .environment(\.locale, DisplayPrefs.clockLocale(timeFormat))
                 .listRowInsets(settingsRowInsets)
 
                 if let reminderError {

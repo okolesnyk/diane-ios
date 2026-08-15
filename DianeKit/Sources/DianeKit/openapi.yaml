@@ -310,6 +310,10 @@ components:
         choreReminderTime:
           type: string
           nullable: true
+        weekStart:
+          $ref: "#/components/schemas/WeekStart"
+        timeFormat:
+          $ref: "#/components/schemas/TimeFormat"
         role:
           $ref: "#/components/schemas/Role"
         sortOrder:
@@ -329,12 +333,26 @@ components:
         - avatar
         - birthday
         - choreReminderTime
+        - weekStart
+        - timeFormat
         - role
         - sortOrder
         - hasPassword
         - hasPasskeys
         - passwordResetRequired
         - createdAt
+    WeekStart:
+      type: string
+      enum:
+        - system
+        - sunday
+        - monday
+    TimeFormat:
+      type: string
+      enum:
+        - system
+        - 12h
+        - 24h
     MemberCreate:
       type: object
       properties:
@@ -389,6 +407,10 @@ components:
           nullable: true
           pattern: ^([01]\d|2[0-3]):[0-5]\d$
           example: 18:00
+        weekStart:
+          $ref: "#/components/schemas/WeekStart"
+        timeFormat:
+          $ref: "#/components/schemas/TimeFormat"
         sortOrder:
           type: integer
           minimum: 0
@@ -461,6 +483,10 @@ components:
           type: integer
           minimum: 0
           maximum: 1440
+        weekStart:
+          $ref: "#/components/schemas/WeekStart"
+        timeFormat:
+          $ref: "#/components/schemas/TimeFormat"
         createdAt:
           type: string
       required:
@@ -470,6 +496,8 @@ components:
         - weatherLocation
         - modules
         - reminderLeadMinutes
+        - weekStart
+        - timeFormat
         - createdAt
     HouseholdModules:
       type: object
@@ -532,6 +560,10 @@ components:
           type: integer
           minimum: 0
           maximum: 1440
+        weekStart:
+          $ref: "#/components/schemas/WeekStart"
+        timeFormat:
+          $ref: "#/components/schemas/TimeFormat"
     CalendarAccountList:
       type: object
       properties:
@@ -1099,6 +1131,22 @@ components:
                   - code
                   - tempMinC
                   - tempMaxC
+            hourly:
+              type: array
+              items:
+                type: object
+                properties:
+                  time:
+                    type: string
+                    pattern: ^\d{4}-\d{2}-\d{2}T\d{2}:00$
+                  tempC:
+                    type: number
+                  code:
+                    type: integer
+                required:
+                  - time
+                  - tempC
+                  - code
           required:
             - label
             - fetchedAt

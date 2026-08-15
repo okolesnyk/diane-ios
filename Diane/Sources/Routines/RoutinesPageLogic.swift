@@ -58,7 +58,7 @@ enum RoutinesPageLogic {
         var stillOpen: Int = 0
     }
 
-    static func sub(_ entry: Entry, phase: RoutinesBoardLogic.Phase) -> Sub {
+    static func sub(_ entry: Entry, phase: RoutinesBoardLogic.Phase, use24: Bool) -> Sub {
         guard !entry.tasks.isEmpty else {
             return Sub(text: "No tasks yet — tap the routine to edit")
         }
@@ -69,9 +69,9 @@ enum RoutinesPageLogic {
         case .now:
             return complete
                 ? Sub(text: "Done for today ✓", done: true)
-                : Sub(text: "Until \(entry.windowEnd) · \(counted) of \(total)")
+                : Sub(text: "Until \(ClockDisplay.label(entry.windowEnd, use24: use24)) · \(counted) of \(total)")
         case .laterToday:
-            return Sub(text: "\(entry.windowStart)–\(entry.windowEnd)")
+            return Sub(text: ClockDisplay.range(entry.windowStart, entry.windowEnd, use24: use24))
         case .earlier:
             return complete
                 ? Sub(text: "All \(total) done ✓", done: true)

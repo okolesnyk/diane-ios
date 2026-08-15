@@ -253,6 +253,7 @@ struct RoutineFormView: View {
     let members: [Components.Schemas.Member]
     let mode: RoutineFormMode
     let onSaved: () -> Void
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     init(
         context: SignedInContext,
@@ -322,6 +323,8 @@ struct RoutineFormView: View {
                 }
         }
         .interactiveDismissDisabled(saving || isDirty)  // R4
+        // Time pickers follow the ACCOUNT clock convention, not just the device.
+        .environment(\.locale, DisplayPrefs.clockLocale(timeFormat))
         .task { await prepare() }
         .alert(
             "Delete this routine?",
@@ -444,7 +447,12 @@ struct RoutineFormView: View {
                     displayedComponents: .hourAndMinute
                 )
             } else {
-                Text("\(state.windowStart)–\(state.windowEnd)")
+                Text(
+                    ClockDisplay.range(
+                        state.windowStart, state.windowEnd,
+                        use24: DisplayPrefs.uses24Hour(timeFormat)
+                    )
+                )
                     .font(.system(.subheadline, design: .rounded))
                     .foregroundStyle(.secondary)
             }

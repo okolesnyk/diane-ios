@@ -33,15 +33,13 @@ enum ChoreDetailLogic {
     }
 
     /// "Done ✓ by Ann · 17:42" — completion instant shown in the household tz.
-    static func doneLine(byName name: String?, completedAt: String?, timeZone: TimeZone) -> String {
+    static func doneLine(
+        byName name: String?, completedAt: String?, timeZone: TimeZone, use24: Bool
+    ) -> String {
         var line = "Done ✓"
         if let name { line += " by \(name)" }
         if let completedAt, let instant = parseInstant(completedAt) {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.timeZone = timeZone
-            formatter.dateFormat = "HH:mm"
-            line += " · \(formatter.string(from: instant))"
+            line += " · \(ClockDisplay.time(instant, timeZone: timeZone, use24: use24))"
         }
         return line
     }
@@ -61,7 +59,8 @@ enum ChoreDetailLogic {
         dueDate: String?,
         dueMode: Occurrence.DueModePayload?,
         dueTime: String?,
-        today: String
+        today: String,
+        use24: Bool
     ) -> String {
         guard let dueDate else { return "Anytime" }
         var line: String
@@ -72,7 +71,7 @@ enum ChoreDetailLogic {
         } else {
             line = "Due \(fullDate(dueDate))"
         }
-        if let dueTime { line += " at \(dueTime)" }
+        if let dueTime { line += " at \(ClockDisplay.label(dueTime, use24: use24))" }
         return line
     }
 
@@ -106,6 +105,7 @@ struct ChoreDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
     @Environment(HouseholdClock.self) private var clock
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     @State private var alertMessage: String?
     @State private var editing = false
@@ -156,7 +156,8 @@ struct ChoreDetailView: View {
                             dueDate: occurrence.dueDate,
                             dueMode: occurrence.dueMode,
                             dueTime: occurrence.dueTime,
-                            today: clock.today
+                            today: clock.today,
+                            use24: DisplayPrefs.uses24Hour(timeFormat)
                         ),
                         systemImage: "calendar"
                     )
@@ -247,7 +248,8 @@ struct ChoreDetailView: View {
             Text(ChoreDetailLogic.doneLine(
                 byName: occurrence.completedByMemberId.flatMap { membersByID[$0]?.name },
                 completedAt: occurrence.completedAt,
-                timeZone: clock.timeZone
+                timeZone: clock.timeZone,
+                use24: DisplayPrefs.uses24Hour(timeFormat)
             ))
             .font(.subheadline.weight(.semibold))
             .foregroundStyle(.green)

@@ -261,7 +261,7 @@ enum DayLogic {
     /// "Due Sun, Aug 10 16:00" — the debt's origin on a Catch up row; ONE
     /// grammar for the Today page and the Chores module (owner 2026-08-10 —
     /// the two Catch ups disagreed; real dates, no "yesterday").
-    static func dueOrigin(_ chore: Chore, today: String) -> String? {
+    static func dueOrigin(_ chore: Chore, today: String, use24: Bool) -> String? {
         guard let due = chore.dueDate else { return nil }
         var dayPart: String
         if due == today {
@@ -273,7 +273,7 @@ enum DayLogic {
             if due.prefix(4) != today.prefix(4) { dayPart += ", \(due.prefix(4))" }
         }
         guard let time = chore.dueTime else { return dayPart }
-        return "\(dayPart) \(time)"
+        return "\(dayPart) \(ClockDisplay.label(time, use24: use24))"
     }
 
     // MARK: - Calendar-color rails (owner rule: strip = calendar, tint = member)

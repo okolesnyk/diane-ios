@@ -68,8 +68,10 @@ enum RoutinesBoardLogic {
 
     /// Routine section caption: the window, plus the phase when no "Now" pill
     /// is there to say it.
-    static func headerCaption(windowStart: String, windowEnd: String, phase: Phase) -> String {
-        let window = "\(windowStart)–\(windowEnd)"
+    static func headerCaption(
+        windowStart: String, windowEnd: String, phase: Phase, use24: Bool
+    ) -> String {
+        let window = ClockDisplay.range(windowStart, windowEnd, use24: use24)
         return phase == .now ? window : "\(window) · \(phase.title)"
     }
 
@@ -123,9 +125,11 @@ enum RoutinesManageLogic {
     }
 
     /// "06:00–12:00 · 2 members" row subtitle.
-    static func subtitle(windowStart: String, windowEnd: String, assigneeCount: Int) -> String {
+    static func subtitle(
+        windowStart: String, windowEnd: String, assigneeCount: Int, use24: Bool
+    ) -> String {
         let who = assigneeCount == 1 ? "1 member" : "\(assigneeCount) members"
-        return "\(windowStart)–\(windowEnd) · \(who)"
+        return "\(ClockDisplay.range(windowStart, windowEnd, use24: use24)) · \(who)"
     }
 }
 
@@ -176,6 +180,7 @@ struct RoutinesView: View {
 
     /// Member tint — the device-local display pref (owner rule 2026-08-05).
     @AppStorage("memberTint") private var tintOn = true
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     @State private var board: Loadable<Components.Schemas.RoutineBoard> = .loading
     @State private var members: [Components.Schemas.Member] = []
@@ -400,7 +405,9 @@ struct RoutinesView: View {
     ) -> some View {
         let key = RoutinesPageLogic.cardKey(entry)
         let open = expanded.contains(key)
-        let sub = RoutinesPageLogic.sub(entry, phase: phase)
+        let sub = RoutinesPageLogic.sub(
+            entry, phase: phase, use24: DisplayPrefs.uses24Hour(timeFormat)
+        )
         let streak = RoutinesPageLogic.displayedStreak(entry)
 
         HStack(spacing: 8) {
@@ -1061,6 +1068,7 @@ struct ManageRoutinesView: View {
     let context: SignedInContext
 
     @Environment(AppState.self) private var appState
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     @State private var routines: Loadable<[Components.Schemas.Routine]> = .loading
     @State private var members: [Components.Schemas.Member] = []
@@ -1131,7 +1139,8 @@ struct ManageRoutinesView: View {
                     Text(RoutinesManageLogic.subtitle(
                         windowStart: routine.windowStart,
                         windowEnd: routine.windowEnd,
-                        assigneeCount: routine.assigneeIds.count
+                        assigneeCount: routine.assigneeIds.count,
+                        use24: DisplayPrefs.uses24Hour(timeFormat)
                     ))
                     .font(.caption)
                     .foregroundStyle(.secondary)

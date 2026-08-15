@@ -192,8 +192,9 @@ import Testing
     @Test func timeLabelFormatsLocalRange() {
         let logic = makeLogic()
         let occurrence = timed("2026-07-27T14:00:00Z", "2026-07-27T15:30:00Z")
-        #expect(logic.timeLabel(for: occurrence) == "16:00–17:30")
-        #expect(logic.timeLabel(for: allDay("2026-07-27", "2026-07-28")) == "all day")
+        #expect(logic.timeLabel(for: occurrence, use24: true) == "16:00–17:30")
+        #expect(logic.timeLabel(for: occurrence, use24: false) == "4:00–5:30 PM")
+        #expect(logic.timeLabel(for: allDay("2026-07-27", "2026-07-28"), use24: true) == "all day")
     }
 
     // MARK: Commit gate

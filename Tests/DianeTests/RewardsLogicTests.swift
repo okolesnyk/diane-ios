@@ -31,7 +31,8 @@ import Testing
     private func member(_ id: String) -> Components.Schemas.Member {
         .init(
             id: id, name: id.uppercased(), color: "#0a84ff", avatar: nil, birthday: nil,
-            choreReminderTime: nil, role: .kid, sortOrder: 0, hasPassword: false,
+            choreReminderTime: nil, weekStart: .system, timeFormat: .system,
+            role: .kid, sortOrder: 0, hasPassword: false,
             hasPasskeys: false, passwordResetRequired: false, createdAt: "2026-07-01T00:00:00Z"
         )
     }

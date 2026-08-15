@@ -38,6 +38,28 @@ enum DisplayPrefs {
         default: Foundation.Calendar.current.firstWeekday
         }
     }
+
+    /// "system" | "12h" | "24h" — does this device show 24-hour clocks?
+    static func uses24Hour(_ raw: String) -> Bool {
+        switch raw {
+        case "12h": false
+        case "24h": true
+        default: Locale.current.hourCycle == .zeroToTwentyThree
+            || Locale.current.hourCycle == .oneToTwentyFour
+        }
+    }
+
+    /// A locale whose hour cycle matches the pref, otherwise the device's own
+    /// — hands the system time pickers the same convention the labels use.
+    static func clockLocale(_ raw: String) -> Locale {
+        var components = Locale.Components(locale: .current)
+        switch raw {
+        case "12h": components.hourCycle = .oneToTwelve
+        case "24h": components.hourCycle = .zeroToTwentyThree
+        default: return .autoupdatingCurrent
+        }
+        return Locale(components: components)
+    }
 }
 
 struct RootView: View {

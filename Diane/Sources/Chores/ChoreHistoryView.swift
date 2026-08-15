@@ -120,6 +120,7 @@ struct ChoreHistoryView: View {
     @Environment(SyncSignals.self) private var signals
     @Environment(HouseholdClock.self) private var clock
     @Environment(MemberFilterStore.self) private var filter
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     @State private var period: ChoreHistoryLogic.Period = .week
     @State private var data: Loadable<Loaded> = .loading
@@ -277,7 +278,7 @@ struct ChoreHistoryView: View {
             Text(lead.title)
                 .foregroundStyle(dismissed ? Color.secondary : Color.primary)
             Spacer(minLength: 8)
-            Text(TimeLogic.timeLabel(lead.occurredAt, timeZone: clock.timeZone) ?? "")
+            Text(TimeLogic.timeLabel(lead.occurredAt, timeZone: clock.timeZone, use24: DisplayPrefs.uses24Hour(timeFormat)) ?? "")
                 .font(.caption)
                 .monospacedDigit()
                 .foregroundStyle(.tertiary)

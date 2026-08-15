@@ -167,7 +167,8 @@ enum ChoreBoard {
     static func rowAccessibilityLabel(
         _ occurrence: Occurrence,
         attribution: String? = nil,
-        completedByName: String? = nil
+        completedByName: String? = nil,
+        use24: Bool = true
     ) -> String {
         var parts = [occurrence.title]
         if occurrence.status == .completed {
@@ -178,7 +179,9 @@ enum ChoreBoard {
         if occurrence.dueMode == .by, let due = occurrence.dueDate {
             parts.append("by \(ChoresManageLogic.monthDay(due))")
         }
-        if let time = occurrence.dueTime { parts.append("at \(time)") }
+        if let time = occurrence.dueTime {
+            parts.append("at \(ClockDisplay.label(time, use24: use24))")
+        }
         parts.append(occurrence.starValue == 1 ? "1 star" : "\(occurrence.starValue) stars")
         if let attribution { parts.append(attribution) }
         if let completedByName { parts.append("completed by \(completedByName)") }
@@ -225,15 +228,17 @@ enum ChoresManageLogic {
 
     /// "Every Mon, Wed at 07:30" — the schedule shape plus its due time
     /// (web scheduleSummary parity; the four shapes of packages/chores).
-    static func scheduleSummary(_ chore: Chore) -> String {
+    static func scheduleSummary(_ chore: Chore, use24: Bool) -> String {
         var summary = shapeSummary(chore)
-        if let time = chore.dueTime, !time.isEmpty { summary += " at \(time)" }
+        if let time = chore.dueTime, !time.isEmpty {
+            summary += " at \(ClockDisplay.label(time, use24: use24))"
+        }
         return summary
     }
 
     /// Row subtitle: schedule plus who does it (nobody = up for grabs).
-    static func subtitle(_ chore: Chore) -> String {
-        "\(scheduleSummary(chore)) · \(who(chore))"
+    static func subtitle(_ chore: Chore, use24: Bool) -> String {
+        "\(scheduleSummary(chore, use24: use24)) · \(who(chore))"
     }
 
     static func who(_ chore: Chore) -> String {
@@ -340,6 +345,7 @@ struct ChoresView: View {
     @Environment(SyncSignals.self) private var signals
     @Environment(AppState.self) private var appState
     @Environment(HouseholdClock.self) private var clock
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     @State private var data: Loadable<ChoresData> = .loading
     @State private var tab: ChoresTab = .mine
@@ -615,7 +621,8 @@ struct ChoresView: View {
                 ChoreBoard.rowAccessibilityLabel(
                     occurrence,
                     attribution: attribution?.name,
-                    completedByName: completedByName
+                    completedByName: completedByName,
+                    use24: DisplayPrefs.uses24Hour(timeFormat)
                 )
             )
             .accessibilityHint("Opens chore details")
@@ -874,6 +881,7 @@ private struct ManageChoresView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     @State private var chores: Loadable<[Components.Schemas.Chore]> = .loading
     @State private var editing: EditTarget?
@@ -954,7 +962,7 @@ private struct ManageChoresView: View {
                     Text(chore.title)
                         .font(.headline)
                         .fontDesign(.rounded)
-                    Text(ChoresManageLogic.subtitle(chore))
+                    Text(ChoresManageLogic.subtitle(chore, use24: DisplayPrefs.uses24Hour(timeFormat)))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -971,7 +979,7 @@ private struct ManageChoresView: View {
         }
         .buttonStyle(.plain)
         .listRowInsets(choreRowInsets)
-        .accessibilityLabel("Edit \(chore.title), \(ChoresManageLogic.subtitle(chore))")
+        .accessibilityLabel("Edit \(chore.title), \(ChoresManageLogic.subtitle(chore, use24: DisplayPrefs.uses24Hour(timeFormat)))")
     }
 
     private func load() async {

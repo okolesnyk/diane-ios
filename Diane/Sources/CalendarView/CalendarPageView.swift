@@ -66,6 +66,7 @@ struct CalendarPageView: View {
 
     /// The Settings "Week starts" pref (M9e-8): system, or Sunday/Monday.
     @AppStorage("weekStart") private var weekStart = "system"
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     private var logic: CalendarPageLogic {
         var calendar = Foundation.Calendar.current
@@ -420,7 +421,7 @@ struct CalendarPageView: View {
 
     private func agendaRow(_ event: Components.Schemas.EventOccurrence, loaded: PageData) -> some View {
         HStack(spacing: 10) {
-            Text(logic.week.timeLabel(for: event))
+            Text(logic.week.timeLabel(for: event, use24: DisplayPrefs.uses24Hour(timeFormat)))
                 .font(.caption.weight(.medium))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
@@ -550,7 +551,7 @@ struct CalendarPageView: View {
                 VStack(spacing: 0) {
                     ForEach(hours, id: \.self) { hour in
                         HStack(spacing: 8) {
-                            Text(String(format: "%02d:00", hour))
+                            Text(ClockDisplay.hourLabel(hour, use24: DisplayPrefs.uses24Hour(timeFormat)))
                                 .font(.caption2)
                                 .monospacedDigit()
                                 .foregroundStyle(.tertiary)
@@ -644,7 +645,7 @@ struct CalendarPageView: View {
                 // Hairline now-line, today only.
                 if day == clock.today, let now = TimeLogic.minutes(clock.minute) {
                     HStack(spacing: 4) {
-                        Text(clock.minute)
+                        Text(ClockDisplay.label(clock.minute, use24: DisplayPrefs.uses24Hour(timeFormat)))
                             .font(.system(size: 9, weight: .bold)).monospacedDigit()
                             .foregroundStyle(.red)
                             .frame(width: gutter, alignment: .trailing)

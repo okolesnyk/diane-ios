@@ -21,13 +21,9 @@ enum TimeLogic {
         return fractional.date(from: isoInstant) ?? ISO8601DateFormatter().date(from: isoInstant)
     }
 
-    static func timeLabel(_ isoInstant: String?, timeZone: TimeZone) -> String? {
+    static func timeLabel(_ isoInstant: String?, timeZone: TimeZone, use24: Bool) -> String? {
         guard let isoInstant, let date = parseInstant(isoInstant) else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
+        return ClockDisplay.time(date, timeZone: timeZone, use24: use24)
     }
 
     /// "HH:mm" → minutes since midnight.

@@ -351,6 +351,7 @@ struct ChoreFormView: View {
     /// page's per-section add-rows, owner verdict 2026-08-04).
     let defaultDate: String?
     let onSaved: () -> Void
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     init(
         context: SignedInContext,
@@ -419,6 +420,8 @@ struct ChoreFormView: View {
                 }
         }
         .interactiveDismissDisabled(saving || isDirty)  // R4
+        // Time pickers follow the ACCOUNT clock convention, not just the device.
+        .environment(\.locale, DisplayPrefs.clockLocale(timeFormat))
         .task { await prepare() }
         // The chore delete is a HARD delete (chores-v2) — confirm strongly.
         .alert(

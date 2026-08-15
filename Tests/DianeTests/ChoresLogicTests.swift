@@ -48,6 +48,8 @@ import Testing
             id: id,
             name: name,
             color: "#3B82F6",
+            weekStart: .system,
+            timeFormat: .system,
             role: .kid,
             sortOrder: sortOrder,
             hasPassword: false,
@@ -413,30 +415,30 @@ import Testing
     @Test func scheduleSummaryCoversTheFourShapes() {
         // R7: the Manage row must say WHEN a chore happens — its whole point
         // is chores that never appear on today's board.
-        #expect(ChoresManageLogic.scheduleSummary(chore()) == "Anytime")
-        #expect(ChoresManageLogic.scheduleSummary(chore(dueDate: "2026-08-15")) == "Aug 15")
+        #expect(ChoresManageLogic.scheduleSummary(chore(), use24: true) == "Anytime")
+        #expect(ChoresManageLogic.scheduleSummary(chore(dueDate: "2026-08-15"), use24: true) == "Aug 15")
         // dueMode 'on' is the same one-off shape as an absent dueMode.
-        #expect(ChoresManageLogic.scheduleSummary(chore(dueDate: "2026-08-15", dueMode: .on)) == "Aug 15")
-        #expect(ChoresManageLogic.scheduleSummary(chore(dueDate: "2026-08-15", dueMode: .by)) == "By Aug 15")
+        #expect(ChoresManageLogic.scheduleSummary(chore(dueDate: "2026-08-15", dueMode: .on), use24: true) == "Aug 15")
+        #expect(ChoresManageLogic.scheduleSummary(chore(dueDate: "2026-08-15", dueMode: .by), use24: true) == "By Aug 15")
         #expect(
-            ChoresManageLogic.scheduleSummary(chore(recurrence: recurrence(freq: .daily))) == "Daily"
+            ChoresManageLogic.scheduleSummary(chore(recurrence: recurrence(freq: .daily)), use24: true) == "Daily"
         )
     }
 
     @Test func scheduleSummaryAppendsTheDueTime() {
         // R7: the due time rides on every dated/recurring shape.
         #expect(
-            ChoresManageLogic.scheduleSummary(chore(dueDate: "2026-08-15", dueTime: "07:30"))
+            ChoresManageLogic.scheduleSummary(chore(dueDate: "2026-08-15", dueTime: "07:30"), use24: true)
                 == "Aug 15 at 07:30"
         )
         #expect(
             ChoresManageLogic.scheduleSummary(
-                chore(dueDate: "2026-08-15", dueMode: .by, dueTime: "18:00")
+                chore(dueDate: "2026-08-15", dueMode: .by, dueTime: "18:00"), use24: true
             ) == "By Aug 15 at 18:00"
         )
         #expect(
             ChoresManageLogic.scheduleSummary(
-                chore(dueTime: "07:30", recurrence: recurrence(freq: .daily))
+                chore(dueTime: "07:30", recurrence: recurrence(freq: .daily)), use24: true
             ) == "Daily at 07:30"
         )
     }
@@ -444,7 +446,7 @@ import Testing
     @Test func recurringSummariesMatchTheWebCopy() {
         // R7: web scheduleSummary parity, including the absent-field rules.
         func summary(_ payload: Components.Schemas.Chore.RecurrencePayload) -> String {
-            ChoresManageLogic.scheduleSummary(chore(recurrence: payload))
+            ChoresManageLogic.scheduleSummary(chore(recurrence: payload), use24: true)
         }
         #expect(summary(recurrence(freq: .daily, interval: 3)) == "Every 3 days")
         #expect(summary(recurrence(freq: .weekly)) == "Weekly")
@@ -473,7 +475,7 @@ import Testing
         // Defensive: an assignee-less row is the pool even if the flag lags.
         #expect(ChoresManageLogic.who(chore(assignees: [])) == "Up for grabs")
         #expect(
-            ChoresManageLogic.subtitle(chore(assignees: ["m-me"], dueDate: "2026-08-15"))
+            ChoresManageLogic.subtitle(chore(assignees: ["m-me"], dueDate: "2026-08-15"), use24: true)
                 == "Aug 15 · 1 member"
         )
     }

@@ -116,15 +116,17 @@ struct CalendarWeekLogic {
         fetched == current && !cancelled
     }
 
-    /// "HH:mm–HH:mm" in the household zone, or "all day".
-    func timeLabel(for occurrence: Components.Schemas.EventOccurrence) -> String {
+    /// "17:00–18:00" / "5:00–6:00 PM" in the household zone, or "all day".
+    func timeLabel(for occurrence: Components.Schemas.EventOccurrence, use24: Bool) -> String {
         guard !occurrence.allDay,
               let startsAt = occurrence.startsAt,
               let start = parseInstant(startsAt)
         else { return "all day" }
         let startText = timeFormatter.string(from: start)
-        guard let endsAt = occurrence.endsAt, let end = parseInstant(endsAt) else { return startText }
-        return "\(startText)–\(timeFormatter.string(from: end))"
+        guard let endsAt = occurrence.endsAt, let end = parseInstant(endsAt) else {
+            return ClockDisplay.label(startText, use24: use24)
+        }
+        return ClockDisplay.range(startText, timeFormatter.string(from: end), use24: use24)
     }
 }
 
@@ -137,6 +139,7 @@ struct CalendarWeekView: View {
     @Environment(SyncSignals.self) private var signals
     @Environment(AppState.self) private var appState
     @Environment(HouseholdClock.self) private var clock
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     private struct WeekData {
         var events: [Components.Schemas.EventOccurrence]
@@ -349,7 +352,10 @@ struct CalendarWeekView: View {
                         } label: {
                             EventRow(
                                 occurrence: occurrence,
-                                timeLabel: logic.timeLabel(for: occurrence),
+                                timeLabel: logic.timeLabel(
+                                    for: occurrence,
+                                    use24: DisplayPrefs.uses24Hour(timeFormat)
+                                ),
                                 members: week.members
                             )
                         }

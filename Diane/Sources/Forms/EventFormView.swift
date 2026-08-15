@@ -658,6 +658,7 @@ struct EventFormView: View {
     let members: [Components.Schemas.Member]
     let mode: EventFormMode
     let onSaved: () -> Void
+    @AppStorage("timeFormat") private var timeFormat = "system"
 
     init(
         context: SignedInContext,
@@ -723,6 +724,8 @@ struct EventFormView: View {
                 }
         }
         .interactiveDismissDisabled(saving || isDirty)  // R4
+        // Time pickers follow the ACCOUNT clock convention, not just the device.
+        .environment(\.locale, DisplayPrefs.clockLocale(timeFormat))
         .task { await prepare() }
     }
 
