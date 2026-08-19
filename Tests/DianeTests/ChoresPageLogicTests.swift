@@ -136,6 +136,28 @@ struct ChoresPageLogicTests {
         #expect(out.map(\.kind) == [.catchUp, .day])
     }
 
+    /// The shelf keeps the server's chore order (sortOrder, then age), pool
+    /// last — the Today band's read, unified 2026-08-18 (the shelf's old
+    /// title sort disagreed with Today and confused).
+    @Test func anytimeShelfKeepsServerOrderWithPoolLast() {
+        let served = [
+            occ(id: "scan", choreId: "scan", title: "Bodyspec scan", assignee: sib),
+            occ(id: "bank", choreId: "bank", title: "Open bank account"),
+            occ(id: "wash", choreId: "wash", title: "Volvo car wash", assignee: me),
+            occ(id: "pass", choreId: "pass", title: "Zrobyty pasport"),
+        ]
+        let out = sections(tab: .anytime, actionable: served)
+        #expect(out[0].rows.map(\.id) == ["scan", "wash", "bank", "pass"])
+
+        // and it is literally the Today band's order
+        let river = TodayLogic.river(
+            events: [], chores: served, selected: [me, kid, sib],
+            phase: .today, minute: "09:00", timeZone: TimeZone(identifier: "UTC")!,
+            today: today, day: today
+        )
+        #expect(river.anytime.map(\.id) == out[0].rows.map(\.id))
+    }
+
     @Test func anytimeTabIsTheShelfAlone() {
         let out = sections(
             tab: .anytime,

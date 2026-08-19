@@ -132,7 +132,6 @@ enum TodayLogic {
         var out = River()
         var poolCatchUp: [ChoresPageLogic.Row] = []
         var poolDueToday: [ChoresPageLogic.Row] = []
-        var poolAnytime: [ChoresPageLogic.Row] = []
         let viewed = day ?? today
 
         for row in ChoresPageLogic.rows(chores) {
@@ -153,7 +152,7 @@ enum TodayLogic {
             } else if row.dueDate != nil && row.dueDate == viewed {
                 if pool { poolDueToday.append(row) } else { out.dueToday.append(row) }
             } else if row.dueDate == nil {
-                if pool { poolAnytime.append(row) } else { out.anytime.append(row) }
+                out.anytime.append(row)
             }
             // Dated for another day: the Chores page owns those (owner
             // 2026-08-10 — Tomorrow and the 30-day shelf are gone).
@@ -162,7 +161,8 @@ enum TodayLogic {
         // order (owner 2026-08-10: the two pages disagreed).
         out.catchUp = ChoresPageLogic.debtSorted(out.catchUp + poolCatchUp)
         out.dueToday += poolDueToday
-        out.anytime += poolAnytime
+        // Anytime: the shared shelf order (owner 2026-08-18 — both pages).
+        out.anytime = ChoresPageLogic.anytimeOrdered(out.anytime)
 
         for event in events where visible(event, selected: selected) {
             out.flowing.append(.event(event))

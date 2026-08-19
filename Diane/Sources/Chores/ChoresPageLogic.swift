@@ -113,6 +113,13 @@ enum ChoresPageLogic {
         (a.dueTime ?? "99:99", a.title, a.id) < (b.dueTime ?? "99:99", b.title, b.id)
     }
 
+    /// Anytime keeps the server's chore order (sortOrder, then age), pool
+    /// rows last — the Today band's read, now BOTH pages' (owner 2026-08-18:
+    /// the shelf's title sort disagreed with Today and confused).
+    static func anytimeOrdered(_ rows: [Row]) -> [Row] {
+        rows.filter { !$0.isPool } + rows.filter(\.isPool)
+    }
+
     // MARK: - Filter
 
     /// `effective` is the resolved chip set (never empty — "everyone" is
@@ -189,7 +196,7 @@ enum ChoresPageLogic {
         // The Anytime shelf, promoted above the days (owner's fix for "it
         // gets lost down the bottom"). Undated only — a deadline is dated.
         if tab != .scheduled {
-            let shelf = live.filter { $0.dueDate == nil }.sorted(by: order)
+            let shelf = anytimeOrdered(live.filter { $0.dueDate == nil })
             if !shelf.isEmpty {
                 out.append(.init(
                     id: "anytime", title: "Anytime", kind: .anytime,
