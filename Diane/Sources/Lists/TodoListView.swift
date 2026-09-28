@@ -18,6 +18,9 @@ struct TodoListView: View {
     @State private var items: Loadable<[Components.Schemas.ListItem]> = .loading
     @State private var draft = ""
     @State private var confirmingReset = false
+    /// A tapped row's target state, held for a beat so the strike is SEEN
+    /// drawing before the row travels (owner 2026-09-27).
+    @State private var pendingChecked: [String: Bool] = [:]
     @FocusState private var addFocused: Bool
 
     private let rowInsets = EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
@@ -114,25 +117,26 @@ struct TodoListView: View {
     /// The day pages' row anatomy: hierarchical circle in a 44pt frame, and
     /// done = the whole row goes gray (owner 2026-08-08).
     private func row(_ item: Components.Schemas.ListItem) -> some View {
-        Button {
+        let checked = pendingChecked[item.id] ?? item.checked
+        return Button {
             Task { await toggle(item) }
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: item.checked ? "checkmark.circle.fill" : "circle")
+                Image(systemName: checked ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 26))
                     .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(item.checked ? Color.green : Color.secondary)
+                    .foregroundStyle(checked ? Color.green : Color.secondary)
+                    .contentTransition(.symbolEffect(.replace))
                     .frame(width: 44, height: 44)
-                Text(item.name)
-                    .strikethrough(item.checked, color: .secondary)
-                    .foregroundStyle(item.checked ? Color.secondary : Color.primary)
+                CrossingText(text: item.name, crossed: checked)
                 Spacer(minLength: 0)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .grayscale(item.checked ? 1 : 0)
-        .opacity(item.checked ? 0.6 : 1)
+        .grayscale(checked ? 1 : 0)
+        .opacity(checked ? 0.6 : 1)
+        .animation(.easeInOut(duration: 0.35), value: checked)
         .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
         .listRowInsets(EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16))
         .swipeActions(edge: .trailing) {
@@ -142,10 +146,12 @@ struct TodoListView: View {
 
     // MARK: - Data
 
-    private func load() async {
+    private func load(animated: Bool = false) async {
         do {
             switch try await context.client.api.getList(.init(path: .init(id: listID))) {
-            case .ok(let ok): items = .loaded(try ok.body.json.items)
+            case .ok(let ok):
+                let rows = try ok.body.json.items
+                withAnimation(animated ? .snappy : nil) { items = .loaded(rows) }
             case .unauthorized: appState.handleUnauthorized()
             default: if case .loading = items { items = .failed("Couldn\u{2019}t reach your home server.") }
             }
@@ -167,12 +173,19 @@ struct TodoListView: View {
         addFocused = true
     }
 
+    /// The strike draws in place first, then the row travels to its slot
+    /// (done sinks; the newest check tops the done) — a beat of local state
+    /// before the round-trip, so the crossing is seen happening.
     private func toggle(_ item: Components.Schemas.ListItem) async {
+        let target = !item.checked
+        pendingChecked[item.id] = target
+        try? await Task.sleep(for: .milliseconds(420))
         _ = try? await context.client.api.updateListItem(.init(
             path: .init(id: listID, itemId: item.id),
-            body: .json(.init(checked: !item.checked))
+            body: .json(.init(checked: target))
         ))
-        await load()
+        await load(animated: true)
+        pendingChecked.removeValue(forKey: item.id)
     }
 
     /// The drag lands in DISPLAYED terms; the server stores it as the manual

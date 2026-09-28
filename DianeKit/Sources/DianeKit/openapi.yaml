@@ -314,6 +314,8 @@ components:
           $ref: "#/components/schemas/WeekStart"
         timeFormat:
           $ref: "#/components/schemas/TimeFormat"
+        homeLayout:
+          $ref: "#/components/schemas/HomeLayout"
         role:
           $ref: "#/components/schemas/Role"
         sortOrder:
@@ -335,6 +337,7 @@ components:
         - choreReminderTime
         - weekStart
         - timeFormat
+        - homeLayout
         - role
         - sortOrder
         - hasPassword
@@ -353,6 +356,39 @@ components:
         - system
         - 12h
         - 24h
+    HomeLayout:
+      type: array
+      nullable: true
+      items:
+        $ref: "#/components/schemas/HomeLayoutSlot"
+    HomeLayoutSlot:
+      type: object
+      properties:
+        card:
+          $ref: "#/components/schemas/HomeCard"
+        span:
+          $ref: "#/components/schemas/HomeSpan"
+        hidden:
+          type: boolean
+      required:
+        - card
+        - span
+    HomeCard:
+      type: string
+      enum:
+        - calendar
+        - events
+        - chores
+        - routines
+        - lists
+        - rewards
+    HomeSpan:
+      type: string
+      enum:
+        - third
+        - half
+        - twoThirds
+        - full
     MemberCreate:
       type: object
       properties:
@@ -411,6 +447,8 @@ components:
           $ref: "#/components/schemas/WeekStart"
         timeFormat:
           $ref: "#/components/schemas/TimeFormat"
+        homeLayout:
+          $ref: "#/components/schemas/HomeLayout"
         sortOrder:
           type: integer
           minimum: 0
@@ -487,6 +525,8 @@ components:
           $ref: "#/components/schemas/WeekStart"
         timeFormat:
           $ref: "#/components/schemas/TimeFormat"
+        homeLayout:
+          $ref: "#/components/schemas/HomeLayout"
         createdAt:
           type: string
       required:
@@ -498,6 +538,7 @@ components:
         - reminderLeadMinutes
         - weekStart
         - timeFormat
+        - homeLayout
         - createdAt
     HouseholdModules:
       type: object
@@ -564,6 +605,8 @@ components:
           $ref: "#/components/schemas/WeekStart"
         timeFormat:
           $ref: "#/components/schemas/TimeFormat"
+        homeLayout:
+          $ref: "#/components/schemas/HomeLayout"
     CalendarAccountList:
       type: object
       properties:
@@ -2360,6 +2403,9 @@ components:
           nullable: true
         checked:
           type: boolean
+        checkedAt:
+          type: string
+          nullable: true
         sortOrder:
           type: integer
         createdAt:
@@ -2371,6 +2417,7 @@ components:
         - amount
         - categoryId
         - checked
+        - checkedAt
         - sortOrder
         - createdAt
     ListUpdate:

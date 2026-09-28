@@ -25,6 +25,9 @@ struct GroceryListView: View {
     @State private var amountEditing: Components.Schemas.ListItem?
     @State private var amountDraft = ""
     @State private var refiling: Components.Schemas.ListItem?
+    /// A tapped row's target state, held for a beat so the strike is SEEN
+    /// drawing (or lifting) before the row travels (owner 2026-09-27).
+    @State private var pendingChecked: [String: Bool] = [:]
     @FocusState private var addFocused: Bool
 
     private let rowInsets = EdgeInsets(top: 2, leading: 16, bottom: 2, trailing: 16)
@@ -85,7 +88,7 @@ struct GroceryListView: View {
 
     private func listBody(_ rows: [Components.Schemas.ListItem], screenHeight: CGFloat) -> some View {
         let groups = ListsLogic.grouped(items: rows, categories: categories)
-        let history = rows.filter(\.checked)
+        let history = ListsLogic.crossedOrder(rows)
         return List {
             addSection(rows)
             if rows.isEmpty, query.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -232,12 +235,12 @@ struct GroceryListView: View {
     /// category color as a full-height bar hugging the LEFT screen edge —
     /// the reference app's language (owner 2026-08-12, screenshot).
     private func itemRow(_ item: Components.Schemas.ListItem) -> some View {
-        Button {
+        let crossing = pendingChecked[item.id] ?? false
+        return Button {
             Task { await setChecked(item, to: true) }
         } label: {
             HStack(spacing: 11) {
-                Text(item.name)
-                    .foregroundStyle(.primary)
+                CrossingText(text: item.name, crossed: crossing)
                 Spacer(minLength: 8)
                 Button {
                     amountDraft = item.amount
@@ -251,6 +254,8 @@ struct GroceryListView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .opacity(crossing ? 0.5 : 1)
+        .animation(.easeInOut(duration: 0.35), value: crossing)
         .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
         .listRowInsets(rowInsets)
         // The bar lives on the row BACKGROUND, so it spans the row's full
@@ -319,9 +324,7 @@ struct GroceryListView: View {
                     Task { await setChecked(item, to: false) }
                 } label: {
                     HStack(spacing: 10) {
-                        Text(item.name)
-                            .strikethrough(true, color: .secondary)
-                            .foregroundStyle(.secondary)
+                        CrossingText(text: item.name, crossed: pendingChecked[item.id] ?? true)
                         Spacer(minLength: 8)
                         if !item.amount.isEmpty {
                             Text(item.amount).font(.caption).foregroundStyle(.tertiary)
@@ -354,13 +357,15 @@ struct GroceryListView: View {
 
     // MARK: - Data
 
-    private func load() async {
+    private func load(animated: Bool = false) async {
         do {
             async let detailCall = context.client.api.getList(.init(path: .init(id: listID)))
             async let categoriesCall = context.client.api.listGroceryCategories(.init())
             async let libraryCall = context.client.api.listGroceryLibrary(.init())
             switch try await detailCall {
-            case .ok(let ok): items = .loaded(try ok.body.json.items)
+            case .ok(let ok):
+                let rows = try ok.body.json.items
+                withAnimation(animated ? .snappy : nil) { items = .loaded(rows) }
             case .unauthorized: appState.handleUnauthorized(); return
             default: if case .loading = items { items = .failed("Couldn\u{2019}t reach your home server.") }
             }
@@ -403,12 +408,17 @@ struct GroceryListView: View {
         await load()
     }
 
+    /// The strike draws (or lifts) in place first, then the row travels —
+    /// into history's top slot, or back to its aisle (owner 2026-09-27).
     private func setChecked(_ item: Components.Schemas.ListItem, to checked: Bool) async {
+        pendingChecked[item.id] = checked
+        try? await Task.sleep(for: .milliseconds(420))
         _ = try? await context.client.api.updateListItem(.init(
             path: .init(id: listID, itemId: item.id),
             body: .json(.init(checked: checked))
         ))
-        await load()
+        await load(animated: true)
+        pendingChecked.removeValue(forKey: item.id)
     }
 
     private func setAmount(_ item: Components.Schemas.ListItem, to amount: String) async {

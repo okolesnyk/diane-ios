@@ -11,12 +11,14 @@ import Testing
         _ name: String,
         id: String = UUID().uuidString,
         checked: Bool = false,
+        checkedAt: String? = nil,
         categoryId: String? = nil,
         sortOrder: Int = 0
     ) -> Components.Schemas.ListItem {
         .init(
             id: id, listId: "l1", name: name, amount: "", categoryId: categoryId,
-            checked: checked, sortOrder: sortOrder, createdAt: "2026-08-12T00:00:00Z"
+            checked: checked, checkedAt: checkedAt, sortOrder: sortOrder,
+            createdAt: "2026-08-12T00:00:00Z"
         )
     }
 
@@ -76,6 +78,18 @@ import Testing
             item("D", id: "d"),
         ]
         #expect(ListsLogic.todoOrder(rows).map(\.id) == ["b", "d", "a", "c"])
+    }
+
+    /// Owner 2026-09-27: the last row crossed sits on top of the crossed.
+    @Test func crossedOrderReadsNewestFirstOffCheckedAt() {
+        let rows = [
+            item("Old", id: "old", checked: true, checkedAt: "2026-09-27T08:00:00Z"),
+            item("Live", id: "live"),
+            item("Legacy", id: "legacy", checked: true),
+            item("New", id: "new", checked: true, checkedAt: "2026-09-27T09:30:00Z"),
+        ]
+        #expect(ListsLogic.crossedOrder(rows).map(\.id) == ["new", "old", "legacy"])
+        #expect(ListsLogic.todoOrder(rows).map(\.id) == ["live", "new", "old", "legacy"])
     }
 
     @Test func movedMapsDisplayedDragToFullIdOrder() {

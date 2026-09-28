@@ -30,10 +30,25 @@ enum ListsLogic {
 
     // MARK: - To-dos (checklist + plain)
 
-    /// Owner rule: done sinks to the bottom — a stable partition, unchecked
-    /// first, each side in stored (manual) order.
+    /// Crossed rows read newest-first (owner 2026-09-27): the last one
+    /// crossed sits on top, by the server's checkedAt; rows crossed before
+    /// the stamp existed keep stored order after them. Web twin: crossedOrder.
+    static func crossedOrder(_ items: [Components.Schemas.ListItem]) -> [Components.Schemas.ListItem] {
+        let crossed = items.filter(\.checked)
+        let stamped = crossed.enumerated()
+            .filter { $0.element.checkedAt != nil }
+            .sorted { a, b in
+                let (x, y) = (a.element.checkedAt ?? "", b.element.checkedAt ?? "")
+                return x == y ? a.offset < b.offset : x > y
+            }
+            .map(\.element)
+        return stamped + crossed.filter { $0.checkedAt == nil }
+    }
+
+    /// Owner rule: done sinks to the bottom — unchecked first in stored
+    /// (manual) order, then the crossed, newest check on top.
     static func todoOrder(_ items: [Components.Schemas.ListItem]) -> [Components.Schemas.ListItem] {
-        items.filter { !$0.checked } + items.filter(\.checked)
+        items.filter { !$0.checked } + crossedOrder(items)
     }
 
     /// A drag within the DISPLAYED order, mapped back to the full id list the

@@ -78,7 +78,7 @@ struct TodayView: View {
                 content
             }
             .dianeRootChrome()
-            .task(id: "\(signals.version(of: [.chores, .events, .calendars, .members, .settings]))|\(day)") {
+            .task(id: "\(signals.version(of: [.chores, .events, .calendars, .members, .settings]))|\(day)|\(clock.modules)") {
                 await load()
             }
             .dianeDetailDestinations(
@@ -573,12 +573,13 @@ struct TodayView: View {
             default: fail(); return
             }
             switch try await windowCall {
-            case .ok(let ok): loaded.windowChores = try ok.body.json.occurrences
+            // An OFF module leaves Today too (owner 2026-09-27), not just the bar.
+            case .ok(let ok): loaded.windowChores = try (clock.modules.chores ? ok.body.json.occurrences : [])
             case .unauthorized: appState.handleUnauthorized(); return
             default: fail(); return
             }
             switch try await actionableCall {
-            case .ok(let ok): loaded.actionableChores = try ok.body.json.occurrences
+            case .ok(let ok): loaded.actionableChores = try (clock.modules.chores ? ok.body.json.occurrences : [])
             case .unauthorized: appState.handleUnauthorized(); return
             default: fail(); return
             }
@@ -609,6 +610,7 @@ struct TodayView: View {
     /// because the board endpoint refuses dates actions can't land on; its
     /// 422 must never sink the whole load.
     private func fetchBoard(day: String) async -> [Components.Schemas.RoutineBoardEntry] {
+        guard clock.modules.routines else { return [] }
         if day > clock.today {
             guard case .ok(let ok)? = try? await context.client.api.listRoutines(.init()),
                   let routines = try? ok.body.json.routines
